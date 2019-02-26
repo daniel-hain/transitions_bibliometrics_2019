@@ -8,3 +8,4 @@ In the following, you will find the first preliminary results and description of
 
 * [Preliminary results compilation](https://raw.githack.com/daniel-hain/transitions_bibliometrics_2019/master/notebooks/91_descriptives.html)
 * A list of all included publications (`EID` identifier for Scopus) including their identified community membership can be found in the [`input`](https://github.com/daniel-hain/transitions_bibliometrics_2019/blob/master/input/IDs_corpus.csv) folder.
+* A nicer presentation via `github.pages` is currently under construction [here](https://daniel-hain.github.io/transitions_bibliometrics_2019/).
