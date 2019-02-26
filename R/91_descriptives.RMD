@@ -6,6 +6,7 @@ output:
   html_document:
     df_print: paged
     toc: yes
+    toc_depth: 3
     toc_float: yes
     number_sections: yes
 
@@ -38,11 +39,15 @@ library(kableExtra) # For table styling
 library(tidygraph)
 library(ggraph)
 
+# Extra options
+windowsFonts("Arial" = windowsFont("Arial")) # For the plotting of graphs later
+
 # Load necessary functions
 clean_AU <- function(x) {
   x %<>%  mutate(AU = str_squish(AU) ) %>% mutate(AU = str_remove_all(AU, "\\..*") ) %>% mutate(AU = ifelse(AU == "Dosi", "Dosi G", AU) )
     } # TODO: MAke it more generic
-
+# Load summary functions
+source("functions/functions_summary.R")
 ```
 
 ```{r global_options, include=FALSE}
@@ -56,138 +61,197 @@ knitr::opts_chunk$set(echo = FALSE,
 
 ## Corpus Creation
 
-### General steps
-1. Scopus download of documents retrieved from search string from Markard et al. (2012), resulting in ca 2.800 documents. Limited to LANGUAGE=ENGLISH and TYPE=ARTICLE OR CONFERENCE PAPER OR BOOK OR BOOKCHAPTER OR EDITORIAL.
-2. Selecting "seed" publications. 1% most cited total + 1% most cited per year + top3 cited papers from each 2015-2017. Ex-post manual insertion and exclusion (authority based)
-3. Retrieving for each seed 500 publications with most shared references. Again limited to LANGUAGE=ENGLISH and TYPE=ARTICLE OR CONFERENCE PAPER OR BOOK OR BOOKCHAPTER OR EDITORIAL.
+1. Scopus download of documents retrieved from search string from Markard et al. (2012), resulting in ca 2.800 documents. Limited to `LANGUAGE = ENGLISH AND TYPE = (ARTICLE OR CONFERENCE PAPER OR BOOK OR BOOKCHAPTER OR EDITORIAL OR SHORT SURVEY)`.
+2. Selecting "seed" publications. 1% most cited total + 1% most cited per year + top3 cited papers from each 2015-2017. Ex-post manual insertion and exclusion (authority based). Results in 51 seed papers
+3. Retrieving for each seed 1000 publications with most shared references. Again, same limitations as in step 1. Also include tob/1000 cited in the results of step 1.
 4. Adittional ex. post filtering based on citations recieved and connectivity in bibliographic coupling network (see below)
 
-
-### Final corpus Size
+That leads to an overal corpus size of: 
 ```{r}
-M <- readRDS("temp/M_nw.RDS")
+M <- readRDS("temp/M_comleted.RDS")
+M %<>% 
+  left_join(readRDS("temp/M_nlp.RDS") %>% select(EID, topic), by = "EID") %>%
+  inner_join(readRDS("temp/M_nw.RDS") %>% select(EID, dgr, com, dgr_int, com2, dgr_int2), by = "EID") %>%
+  distinct(EID, .keep_all = TRUE) 
+
 cat("Number of unique publications in the final corpus: ", nrow(M))
 ```
 
-Generally, 33 x 500 = 16.500 documents downloaded. However, due to an overlap of publications with most shared references to seed papers, final corpus is smaller. Further, number of adittional references per seed added decline. Yet, increase in non-overlapping references indicates the corpus is not saturated yet.
+
+## Seed Paper {.tabset}
 
 ```{r}
-readRDS("output/corpus_size.RDS") %>%
-  drop_na() %>%
-  ggplot( aes(x = n.seed, y = n) ) +
-  geom_line(size = 1) +
+source("functions/functions_scopus.R")
+seed <- read_scopus("input/00_seed.txt", type = "reduced") %>%
+  arrange(desc(TC), desc(TC_year)) %>%
+  mutate(Ti = TI%>% str_trunc(300),
+         SO = SO %>% str_trunc(50),
+         SR = paste0(1:n(), ": ", AU1, ", (", PY, ") ", (SO %>% str_trunc(50)), ", Cited: ", TC),
+         n = 1:n()) %>%
+  select(n, AU1, SR, PY, TI, SO, TC, TC_year) 
+```
+
+In the following, we more in detail investigate the seed papers. Notice the adittional `tabs` for details.
+
+### Seep papers and corpus size
+
+Generally, 51 x 1000 = 51.000 documents downloaded. However, due to an overlap of publications with most shared references to seed papers, final corpus is smaller. 
+
+```{r, fig.height=5, fig.width=10}
+# index <- fread("input/000_seed_index.csv") %>% na_if("") %>% drop_na(index) %>% distinct(index)  %>% pull() %>% paste0("input/", ., ".txt")
+# x <- tibble()
+# corpus_size <- tibble(SR = c("Seed Papers", "Top-1000 Markard et al. (2012) string", seed %>% pull(SR))) %>% mutate(count = NA)
+# for(i in 1:length(index)) {
+# y <- read_scopus(index[i], TC_min = 1, TC_year_min = 0.25, PY_max = 2019, PY_min = 1998, n_max = 1000, type = "reduced", exclude = c(DT = "Conference Paper")) %>%
+#   arrange(desc(TC), PY) %>% select(EID)
+# x %<>% rbind(y) %>%  distinct(EID, .keep_all = TRUE)
+# corpus_size[i, "count"] <- nrow(x)} %>%  mutate(n = 1:n()) 
+# saveRDS(corpus_size, "output/corpus_size.RDS")
+corpus_size <- readRDS("output/corpus_size.RDS") 
+
+require(plotly)
+plot <- corpus_size %>%
+  ggplot( aes(x = n, y = count, text = SR) ) +
+  geom_point() +
   scale_color_brewer(palette="Dark2")
+
+plot %>% ggplotly(tooltip = c("SR", "y") )
 ```
 
-### Seed Paper
+First insight: Corpus appears to saturate between 20-40, but then introduced new seed lead to an again expanding corpus. Seems to be more from Ecology and Political Science. Along that lines, it appears the main Sustainability corpus seems saturated, expansion appears more in adjacent fields.
+
+### List of all seed papers
+
 ```{r}
-seed <- readRDS("output/seed_papers.RDS") %>% select(-EID) %>% select(AU1, PY, TI, JI, TC, TC_year)
-seed %>% kable() %>% kable_styling(full_width = TRUE, font_size = 8)
+seed %>% 
+  select(-SR) %>%
+  select(n, everything()) %>%
+  kable() %>% 
+  kable_styling(bootstrap_options = c("striped", "hover", "condensed"), full_width = TRUE, font_size = 10) 
 ```
+
 
 ## Publications
-Note: The following tables refer to the documents in the main corpus.
 
-### Top appearing authors, journals, institutions, countries, keywords
-
-Field names:
-
-* AU: Author (fractionalized)
-* SO: Source (Journal or Booktitle)
-* C1: Institution (fractionalized)
-* C1_CN: Country (fractionalized)
-* DE: Author keywords
-
-Generally, `dgr` refers to the degree, `n` to the number of publications. Subscript `.f` indicates the number is fractionalized (divided by the number of elements per publication)
+Note: The following tables refer to the documents in the main corpus. Generally, `dgr` refers to the degree, `n` to the number of publications. Subscript `.f` indicates the number is fractionalized (divided by the number of elements per publication)
 
 ```{r}
-M.sum <- tibble(NR = 1:20) %>%
-  bind_cols(
-    M %>% select(N_AU, AU) %>%
-      mutate(n_frac = 1 / N_AU) %>%
-      unnest(AU) %>%  drop_na() %>%
-      group_by(AU) %>% summarise(n_frac = sum(n_frac)) %>% ungroup() %>%
-      arrange(desc(n_frac)) %>% slice(1:20) 
-    ) %>%
-  bind_cols(
-    M %>% select(SO) %>%
-      drop_na() %>%
-      group_by(SO) %>% summarise(n = n()) %>% ungroup() %>%
-      arrange(desc(n)) %>% slice(1:20) 
-    ) %>%
-  bind_cols(
-    M %>% select(EID, C1) %>%
-      unnest(C1) %>% unnest(C1) %>% drop_na() %>%
-      group_by(EID) %>% mutate(n_frac = 1 / n() ) %>% ungroup() %>%
-      group_by(C1) %>% summarise(n_frac = sum(n_frac)) %>% ungroup() %>%
-      arrange(desc(n_frac)) %>%
-      slice(1:20) 
-    )  %>%
-  bind_cols(
-    M %>% select(EID, C1) %>%
-      unnest(C1) %>% unnest(C1_CN) %>% drop_na() %>%
-      group_by(EID) %>% mutate(n_frac = 1 / n() ) %>% ungroup() %>%
-      group_by(C1_CN) %>% summarise(n_frac = sum(n_frac)) %>% ungroup() %>%
-      arrange(desc(n_frac)) %>%
-      slice(1:20) 
-    )  %>%
-  bind_cols(
-    M %>% select(DE) %>%
-      unnest(DE) %>%  drop_na() %>%
-      count(DE, sort = TRUE) %>% slice(1:20)
-    ) %>%
-  mutate_at(.vars = vars(contains("_n"), contains("_frac")), round, digits = 0) 
-
-colnames(M.sum)  %<>% str_replace("[:digit:]+", "") %>% str_replace("_int", "") %>% str_replace("_frac", ".f")
-
-M.sum %>% kable() %>% kable_styling(full_width = TRUE, font_size = 8) %>%
-  column_spec(c(1, 3, 5, 7, 9), border_right = T)
+M %>% gen_summary(top_n = 20, level = "PUB", what = "count", plot = TRUE) 
 ```
 
-## cited references
-Note: The following tables refer to the **cited references within** the corpus. Number of citation always refers to the citations recieved by the documents in the main corpus.
+## References cited
 
 ```{r}
 C <- readRDS("temp/C_nw.RDS")
+```
+
+
+Note: The following tables refer to the **cited references within** the corpus. Number of citation always refers to the citations recieved by the documents in the main corpus.
+
+```{r}
 cat("Number of unique references cited by the final corpus: ", nrow(C), " (after removing references cited less than 2 times)")
 ```
 
-### Top cited publications, authors, journals
-* AU: Author (fractionalized)
-* SO: Source (Journal or Booktitle)
-* C1: Institution (fractionalized)
-* C1_CN: Country (fractionalized)
-* DE: Author keywords
+This appears to be rather low, only slightly more than 2x more than publications. However, the original number is way higher (ca 200.000), but after excluding (NW based) unconnected or marginally connected references, it drops substantially. This is an indicator that many of the references are cited very few times in the corpus, and the resulting ones represents a somewhat common core.
 
 ```{r}
-C.sum <- tibble(NR = 1:20) %>%
-  bind_cols(
-    C %>% select(SR, TC) %>%
-      arrange(desc(TC)) %>% slice(1:20)
-    ) %>%
-  bind_cols(
-    C %>% select(AU, N_AU, TC) %>%
-      mutate(TC_frac = TC / N_AU, n_frac = 1 / N_AU) %>%
-      unnest(AU) %>% drop_na() %>%
-      group_by(AU) %>% summarise(TC_frac = sum(TC_frac), n_frac = sum(n_frac), TC_n = sum(TC) / n() ) %>% ungroup() %>%
-      arrange(desc(TC_frac)) %>% slice(1:20) 
-  ) %>%
-  bind_cols(
-    C %>% select(SO, TC) %>%
-  group_by(SO) %>% summarise(TC = sum(TC), n = n(), TC_n = sum(TC) / n() ) %>% ungroup() %>%
-  arrange(desc(TC)) %>% slice(1:20) %>%
-  mutate(SO = str_trunc(SO, 35))
-  ) %>%
-  mutate_at(.vars = vars(contains("_n"), contains("_frac")), round, digits = 0) 
+C %>% gen_summary(top_n = 20, level = "REF", what = "count", plot = TRUE) 
+```
 
-colnames(C.sum)  %<>% str_replace("[:digit:]+", "") %>% str_replace("_int", "") %>% str_replace("_frac", ".f")
+# Topic modelling
 
-C.sum %>% kable() %>% kable_styling(full_width = TRUE, font_size = 8) %>%
-  column_spec(c(1, 3, 9), border_right = T)
+```{r}
+el_topic <- readRDS("temp/el_topic.RDS")
+topics_terms <- readRDS("temp/topics_terms.RDS")
+```
+
+I by now created some topic modelling. The results are somewhat preliminary, but already worth taking a look at. We ran a LDA on the titles + abstracts of our corpus, aiming at identifying 10 topics (some different numbers of topics to generate shows that 10 result in good results, more topics lead to too much overlap between them)
+
+## Topics by topwords
+
+```{r, fig.width=15, fig.height=7.5}
+topics_terms %<>%
+  group_by(topic) %>%
+  arrange(topic, desc(beta)) %>%
+  slice(1:10) %>%
+  ungroup() %>%
+  arrange(topic, beta) %>%
+  mutate(order = row_number())
+
+mycol <- topics_terms %>% gg_color_select(cat = topic, pal = "Paired")
+
+topics_terms %>%
+  ggplot(aes(order, beta, fill = factor(topic))) +
+  geom_col(show.legend = FALSE) +
+  facet_wrap(~ topic, ncol = 5, scales = "free") +
+  scale_x_continuous(
+    breaks = topics_terms$order,
+    labels = topics_terms$term,
+    expand = c(0,0) ) +
+    xlab("Words in topic") +
+  ylab("Intra-topic distribution of word") +
+  scale_fill_manual(name = "Legend", values = mycol) +
+  coord_flip()
+```
+
+This might still be finetuned, but initially doesnt look that bad I think. All the topics for me seem to be somewhat identifiable. We should maybe start naming them to make their interpretation later easier. 
+
+
+## Topics over time
+
+```{r, fig.width = 15, fig.height=7.5}
+plot <- el_topic %>%
+  select(PY, topic, weight) %>%
+  mutate(PY = as.numeric(PY)) %>%
+  group_by(PY, topic) %>% summarise(weight = mean(weight)) %>% ungroup() %>%
+  group_by(PY) %>% mutate(weight.PY = sum(weight)) %>% ungroup() %>%
+  mutate(weight.rel = weight / weight.PY) %>%
+  select(PY, topic, weight, weight.rel) %>%
+  filter(PY >= 1990 & PY <= 2017) %>%
+  arrange(PY, topic)
+
+plot_summary_timeline(plot, y1 = weight, y2 = weight.rel, by = topic, pal = "Paired", label = TRUE,
+                               y1_text = "Topic popularity annualy", 
+                               y2_text = "Share of topic annually")
 
 ```
 
+Here, we see quite  a shift in the discourse over timee. Notably, topic `5` (technology & industry dynamics related) over time lost quite a bit in popularity, while particularly topic `2` (energy & policy), topic `6` (transition management), and topic `9` (policy & governance) gained.
+
+## LDAViz
+
+Here you find a nice way of exploring topics via the `LDAVIz tool`. It dispolays all topics in a 2 dimensional PCA, and also gives a nice visual representation over the topics top-word distribution and overall frequencies of this words in the corpus. The $\lambda$ parameter regulates the importance-ordering of the topwords. High $\lambda$ order words by the highest propability to appear in the topic to the lowest (independent of the overall word popularity in the corpus), whle low $\lambda$ emphasize words which are very specific to the topic, and rarely appear in others.
+
+Play a bit around. It's a bit condensed here in the small view, but you can also load it [HERE](https://raw.githack.com/daniel-hain/transitions_bibliometrics_2019/master/notebooks/viz/index.html) in fullscreen for a better overview.
+
+```{r}
+# TODO: Super unelegant up to now
+tab <- tibble::tibble(" " = 
+ '<link rel="stylesheet" type="text/css" href="https://raw.githack.com/daniel-hain/transitions_bibliometrics_2019/master/notebooks/viz/lda.css">
+  <script src="https://raw.githack.com/daniel-hain/transitions_bibliometrics_2019/master/notebooks/viz/d3.v3.js"></script>
+  <script src="https://raw.githack.com/daniel-hain/transitions_bibliometrics_2019/master/notebooks/viz/ldavis.js"></script>
+  <iframe width="1000" height="750" src="https://raw.githack.com/daniel-hain/transitions_bibliometrics_2019/master/notebooks/viz/index.html" frameborder="0"></iframe>')
+
+#tab <- tibble::tibble(" " = 
+# '<link rel="stylesheet" type="text/css" href="C:/Users/Admin/OneDrive - Aalborg Universitet/01 - Research/01 - Research - Bibliometrics Transistions/analysis/output/viz/lda.css">
+#<script src="C:/Users/Admin/OneDrive - Aalborg Universitet/01 - Research/01 - Research - Bibliometrics Transistions/analysis/output/viz/d3.v3.js"></script>
+#<script src="https://raw.githack.com/daniel-hain/transitions_bibliometrics_2019/master/notebooks/viz/ldavis.js"></script>
+#<iframe width="1000" height="750" src="C:/Users/Admin/OneDrive - Aalborg Universitet/01 - Research/01 - Research - Bibliometrics Transistions/analysis/output/viz/index.html#topic=0&lambda=#1&term=" frameborder="0"></iframe>')
+
+knitr::kable(tab, format = "html", escape = FALSE)
+
+```
+
+
+
 # Knowledge Bases: Co-Citation network analysis
+
+```{r}
+names_kb <- c()
+```
+
+
+## Technical description
 
 **Note:** This analysis refers the co-citation analysis, where the cited references and not the original publications are the unit of analysis. Here, the strength of the relationship between a reference pair $m$ and $n$ ($s_{m,n}^{coc}$) is expressed by the number of publications $C$ which are jointly citing reference $m$ and $n$. 
 
@@ -195,55 +259,24 @@ $$s_{m,n}^{coc} = \sum_i c_{i,m} c_{i,n}$$
 
 The intuition here is that references which are frequently cited together are likely to share commonalities in theory, topic, methodology, or context. It can be interpreted as a measure of similarity as evaluated by other researchers that decide to jointly cite both references. Because the publication process is time-consuming, co-citation is a backward-looking measure, which is appropriate to map the relationship between core literature of a field.
 
-## Identified Knowledge Bases
+## Identified knowledge Bases
 In order to partition networks into components or clusters, we deploy a **community detection** technique based on the **Lovain Algorithm** (Blondel et al., 2008). The Lovain Algorithm is a heuristic method that attempts to optimize the modularity of communities within a network by maximizing within- and minimizing between-community connectivity. 
 
 We identify the following communities = knowledge bases
+
+It is not the main focus of this exercise, but still informative to see which historical knowledge the fields draws from. 
 
 ```{r}
 C %>%
   group_by(com) %>%
   summarise(n = n(), density_int = ((sum(dgr_int) / (n() * (n() - 1))) * 100) %>% round(3)) %>%
-  mutate(name = c("Evolutionary Economics?", "Sustainability transitions", "Territorial IS?", "Enviromental Science?")) %>%
-  select(com, name, everything())
+  #mutate(name = c("Evolutionary Economics?", "Sustainability transitions", "Territorial IS?", "Enviromental Science?")) %>%
+  select(com, everything())
 ```
 
-We identify 4 communities of avrying size (note: I just gave it some ad-hoc names to work with for now. Should be revised). We on first glance see that all share a somewhat similar internal density (meaning the references in the corresponding community are stronger connected with each others), except of community 3, which is more densely connected.
+We identify 9 communities of varyying size (note: I just gave it some ad-hoc names to work with for now. Should be revised). Lets take a look at their development over time.
 
-## Most central references, authors, journals per knowledge base
-Lets do a first attempt to categorize them:
-
-```{r}
-C.nw.sum <-C %>% 
-  select(com, SR, dgr_int) %>%
-  group_by(com) %>% arrange(desc(dgr_int)) %>% slice(1:10) %>% ungroup() %>%
-  bind_cols(
-    C %>% select(com, SID, AU, dgr_int) %>%
-      unnest(AU) %>% drop_na() %>% clean_AU() %>%
-      group_by(SID, AU) %>% mutate(dgr_int_frac = dgr_int / n()) %>% ungroup() %>%
-      group_by(com, AU) %>% summarise(dgr_int_frac = sum(dgr_int_frac)) %>% ungroup() %>%
-      group_by(com) %>% arrange(desc(dgr_int_frac)) %>% slice(1:10) %>% ungroup()  %>% select(AU, dgr_int_frac) 
-  ) %>%
-  bind_cols(
-    C %>% select(com, SO, dgr_int) %>% 
-      mutate(SO = str_trunc(SO, 35)) %>%
-      group_by(com, SO) %>% summarise(dgr_int = sum(dgr_int)) %>% ungroup() %>%
-      group_by(com) %>% arrange(desc(dgr_int)) %>% slice(1:10) %>% ungroup() %>% select(SO, dgr_int) 
-  ) %>%
-  mutate_at(.vars = vars(contains("_int")), round, digits = 0) 
-
-colnames(C.nw.sum)  %<>% str_replace("[:digit:]+", "") %>% str_replace("_int", "") %>% str_replace("_frac", ".f")
-C.nw.sum %>% kable() %>% kable_styling(full_width = TRUE, font_size = 9) %>%
-  column_spec(c(1, 3, 5), border_right = T) %>%
-  row_spec(c(10,20,30), extra_css = "border-bottom: 2px solid")
-```
-
-## Development over time
-
-```{r}
-require(RColorBrewer)
-require(ggpubr)
-
+```{r, fig.width = 15, fig.height=7.5}
 plot <- C %>% 
   select(com, PY, TC) %>%
   mutate(PY = as.numeric(PY)) %>%
@@ -253,36 +286,94 @@ plot <- C %>%
   mutate(TC.rel = TC / TC.PY) %>%
   select(com, PY, n, n.rel, TC, TC.rel) %>%
   filter(PY >= 1980 & PY <= 2015) %>%
-  arrange(PY, com)
+  arrange(PY, com)%>% 
+  plot_summary_timeline(y1 = n, y2 = n.rel, by = com, pal = "Paired",   
+                        y1_text = "Number citations recieved annually", 
+                        y2_text = "Share of citations recieved annually")
 ```
 
-### Number of Citations recieved  over time
 
-```{r, fig.width = 15, fig.height=7.5}
-p1 <- ggplot(plot, aes(x = PY, y = TC, col = factor(com) )) +
-  geom_line(size = 1) +
-  labs(x = "Year (Publication of cited reference)", y="Number citations recieved annually") +
-  scale_color_brewer(palette = "Dark2") 
 
-p2 <- ggplot(plot, aes(x = PY, y = TC.rel, fill = factor(com))) +
-  geom_area(position="stack") +
-  labs(x = "Year (Publication of cited reference)", y = "Share of citations recieved annually") +
-  scale_fill_brewer(palette="Dark2") 
+Lets do a first attempt to categorize them. Notice the tabs for details.
 
-ggarrange(p1, p2, ncol = 2, nrow = 1, common.legend = TRUE, legend = "bottom")
+## Detailed look at the knowledge bases {.tabset}
 
-### Save colors
-cit_col <- bind_cols(com = unique(p1$data$com), 
-                 color = unique(ggplot_build(p1)$data[[1]]["colour"])) %>%
-  arrange(com)
-saveRDS(cit_col, "temp/cit_col.RDS") 
+### Knowledge base 1
 
+```{r}
+C %>% gen_summary(top_n = 10, level = "REF", what = "general", plot = TRUE, select_com = 1) 
 ```
 
-We see number of citations towards the STS knowledge base to sharply increase post-2000. Interestingly, citations to the evolutionary economics and industry-dynamics related knowledge base to completely vanish.
+Seems to be pretty much industry & technology dynamics, evolutionary economics, organizational learning classics.
+
+### Knowledge base 2
+
+```{r}
+C %>% gen_summary(top_n = 10, level = "REF", what = "general", plot = TRUE, select_com = 2) 
+```
+
+That one appears to be also a bit classic, but way more with a geographical focus, or generally pronouncing the role of space.
+
+### Knowledge base 3
+
+```{r}
+C %>% gen_summary(top_n = 10, level = "REF", what = "general", plot = TRUE, select_com = 3) 
+```
+
+This appears to be the sustainable transitions internal knowledge base. Notice that it seems to be rather young, almost no central references pre-2000
+
+### Knowledge base 4
+
+```{r}
+C %>% gen_summary(top_n = 10, level = "REF", what = "general", plot = TRUE, select_com = 4) 
+```
+
+Know to little about this literature, but seems to be more policy & governance.
+
+### Knowledge base 5
+
+```{r}
+C %>% gen_summary(top_n = 10, level = "REF", what = "general", plot = TRUE, select_com = 5) 
+```
+
+More sociology, social practice, consumer behavior
+
+### Knowledge base 6
+
+```{r}
+C %>% gen_summary(top_n = 10, level = "REF", what = "general", plot = TRUE, select_com = 6) 
+```
+
+Ecology and enviromental science
+
+### Knowledge base 7
+
+```{r}
+C %>% gen_summary(top_n = 10, level = "REF", what = "general", plot = TRUE, select_com = 7) 
+```
+
+Also ecology, but with a more geographical focus.
+
+### Knowledge base 8
+
+```{r}
+C %>% gen_summary(top_n = 10, level = "REF", what = "general", plot = TRUE, select_com = 8) 
+```
+
+Entrepreneurship
+
+### Knowledge base 9
+
+```{r}
+C %>% gen_summary(top_n = 10, level = "REF", what = "general", plot = TRUE, select_com = 6) 
+```
+
+Enviromental science, system modeling.
 
 
 # Research Areas: Bibliographic coupling analysis
+
+## Technical description
 This is arguably the most interesting part. Here, we identify the literature's current knowledge frontier by carrying out a bibliographic coupling analysis of the publications in our corpus. This measure  uses bibliographical information of  publications to establish a similarity relationship between them. This **coupling-strength} between publications is determined by the number of commonly cited references they share, assuming a common pool of references to indicate similarity in context, methods, or theory. Formally, the strength of the relationship between a publication pair $i$ and $j$ ($s_{i,j}^{bib}$) is expressed by the number of commonly cited references. 
 
 $$	s_{i,j}^{bib} = \sum_m c_{i,m} c_{j,m} $$
@@ -296,148 +387,174 @@ $$	S_{i,j}^{jac-bib} =\frac{C(i \cap j)}{C(i \cup j)} = \frac{s_{i,j}^{bib}}{c_i
 More recent articles have a higher pool of possible references to co-cite to, hence they are more likely to be coupled. Consequently, bibliographic coupling represents a forward looking measure, and the method of choice to identify the current knowledge frontier at the point of analysis.
 
 
-## Identified Knowledge Bases
-To identify communities in the field's knowledge frontier (labeled **research areas**) we again use the **Lovain Algorithm** (Blondel et al., 2008). 
+## Identified research areas
 
-We identify the following communities = research areas
+To identify communities in the field's knowledge frontier (labeled **research areas**) we again use the **Lovain Algorithm** (Blondel et al., 2008). We identify the following communities = research areas
 
 ```{r}
 M %>%
   group_by(com) %>%
   summarise(n = n(), density_int = ((sum(dgr_int) / (n() * (n() - 1))) * 100) %>% round(3)) %>%
   select(com, everything())
+
 ```
 
-We on first glance see that RA 1&2 are substantially larger than the rest.
-
-
-## Publications over time
 
 ```{r, fig.width = 15, fig.height=7.5}
-plot <- M %>%
+M %>%
   mutate(PY = PY %>% as.numeric()) %>%
   group_by(com, PY) %>% summarise(n = n()) %>% ungroup() %>%
   group_by(PY) %>% mutate(n.PY = sum(n)) %>% ungroup() %>%
   mutate(n.rel = n / n.PY) %>%
   select(com, PY, n, n.rel) %>%
-  filter(PY >= 1980 & PY <= 2017) %>% 
-  arrange(com, PY)
-
-require(ggplot2)
-p1 <- plot  %>% ggplot(aes(x = PY, y = n, col = as.factor(com)) ) +
-  geom_line(size = 1) +
-  labs(x = "Year of publication", y = "Number publications annually") 
-
-p2 <- plot  %>% ggplot(aes(x = PY, y = n.rel, fill = as.factor(com)) ) +
-  geom_area(position = "stack") +
-  labs(x = "Year of publication",y = "Share of publications annually") 
-
-library(ggpubr)
-ggarrange(p1, p2, ncol = 2, nrow=1, common.legend = TRUE, legend = "bottom")
-
-
-# save colors
-bib_col <- bind_cols(com = unique(p1$data$com), 
-                     color = unique(ggplot_build(p1)$data[[1]]["colour"])) %>%
-  arrange(com)
-saveRDS(bib_col, "temp/bib_col.RDS") 
+  filter(PY >= 1990 & PY <= 2017) %>% 
+  arrange(com, PY) %>% plot_summary_timeline(y1 = n, y2 = n.rel, by = com, label = TRUE,
+                               y1_text = "Number publications annually", 
+                               y2_text = "Share of publications annually")
 ```
 
-
-## Characterizing the research areas
+## Research Areas in detail {.tabset}
 
 ```{r}
-M %<>% 
+M1 <- M %>% 
   filter(TC >= 10 | TC_year >= 5) %>%
   filter(PY >= 1980 & PY <= 2019) %>%
   filter(NR >= 10 & NR <= 750) %>%
   filter( !(DT %in% c("Review", "Conference Paper")) )
+
 ```
 
-Now its time to describe them. In the following, I provide some statistics statistics per community which I find helpful to do so:
+Lets again classify them one-by-one.
 
-### Most central publications per research area
+**Brief reminder:** Centrality in a bibliographic coupling network == representativeness != importance. Therefore, the central articles should be appropriate to characterize the kind of work done in the community, but are not necessarily the most important or influencial ones.
+
+### Research Area 1
+
+#### Most central authors, journals, institutions, most cited references
+```{r}
+M1 %>% gen_summary(top_n = 10, level = "PUB", what = "general", plot = TRUE, select_com = 1)
+```
+
+#### Most central publications
 
 ```{r}
-M %>% select(com, AU1, PY, SO, TI, dgr_int) %>%
-  group_by(com) %>% arrange(desc(dgr_int)) %>%
-  slice(1:10) %>% ungroup() %>% mutate(TI = TI %>% str_trunc(100)) %>%
-  kable() %>% kable_styling(full_width = TRUE, font_size = 9) %>%
-  row_spec(c(10,20,30, 40, 50), extra_css = "border-bottom: 2px solid")
+M1 %>% gen_summary(top_n = 10, level = "PUB", what = "top", plot = TRUE, select_com = 1) 
 ```
 
-### Most central journals, authors, institutions, countries
+#### Summary
+
+TBD.
+
+
+### Research Area 2
+
+#### Most central authors, journals, institutions, most cited references
+```{r}
+M1 %>% gen_summary(top_n = 10, level = "PUB", what = "general", plot = TRUE, select_com = 2)
+```
+
+#### Most central publications
 
 ```{r}
-M.nw.sum <- M %>% select(com, EID, dgr_int, AU) %>%
-  unnest(AU) %>% drop_na(AU) %>% clean_AU() %>%
-  group_by(EID, AU) %>% mutate(dgr_int_frac = dgr_int / n()) %>% ungroup() %>%
-  group_by(com, AU) %>% summarise(dgr_int_frac = sum(dgr_int_frac)) %>% ungroup() %>%
-  group_by(com) %>% arrange(desc(dgr_int_frac)) %>% slice(1:10) %>% ungroup() %>%
-  select(com, AU, dgr_int_frac) %>%
-    bind_cols(
-    M %>% select(com, CR) %>%
-      unnest(CR) %>% mutate(CR = paste0(CR_AU1, " (" , CR_PY, ") ", CR_SO %>% str_trunc(35) ) )  %>% drop_na(CR_SID) %>%
-      group_by(com, CR) %>% summarise(n = n()) %>% ungroup() %>%
-      group_by(com) %>% arrange(desc(n)) %>% slice(1:10) %>% ungroup() %>%
-      select(CR, n)
-    ) %>%
-  bind_cols(
-    M %>% select(com, EID, SO, dgr_int) %>%
-      group_by(com, SO) %>% summarise(dgr_int = sum(dgr_int)) %>% ungroup() %>%
-      group_by(com) %>% arrange(desc(dgr_int)) %>% slice(1:10) %>% ungroup() %>%
-      mutate(SO = SO %>% str_trunc(35)) %>%
-      select(SO, dgr_int)
-  ) %>%
-  bind_cols(
-    M %>% select(com, EID, dgr_int, C1) %>%
-      unnest(C1) %>% unnest(C1) %>% drop_na(C1) %>%
-      group_by(EID, C1) %>% mutate(dgr_int_frac = dgr_int / n()) %>% ungroup() %>%
-      group_by(com, C1) %>% summarise(dgr_int_frac = sum(dgr_int_frac)) %>% ungroup() %>%
-      group_by(com) %>% arrange(desc(dgr_int_frac)) %>% slice(1:10) %>% ungroup() %>%
-      mutate(C1 = C1 %>% str_trunc(35)) %>%
-      select(C1, dgr_int_frac)
-  ) %>%
-  bind_cols(
-    M %>% select(com, EID, dgr_int, DE) %>%
-      unnest(DE) %>% drop_na(DE) %>%
-      group_by(com, DE) %>% summarise(dgr_int = sum(dgr_int)) %>% ungroup() %>%
-      group_by(com) %>% arrange(desc(dgr_int)) %>% slice(1:10) %>% ungroup() %>%
-      select(DE, dgr_int)
-  ) %>%
-  mutate_at(.vars = vars(contains("_int")), round, digits = 0) 
-
-colnames(M.nw.sum)  %<>% str_replace("[:digit:]+", "") %>% str_replace("_int", "") %>% str_replace("_frac", ".f")
-
-M.nw.sum %>% kable() %>% kable_styling(full_width = TRUE, font_size = 8) %>%
-  column_spec(c(1, 3, 5, 7, 9), border_right = T) %>%
-  row_spec(c(10, 20, 30, 40, 50), extra_css = "border-bottom: 2px solid")
+M1 %>% gen_summary(top_n = 10, level = "PUB", what = "top", plot = TRUE, select_com = 2) 
 ```
 
-Field names:
+#### Summary
 
-* AU: Author (fractionalized)
-* CR: Most cited references
-* SO: Source (Journal or Booktitle)
-* C1: Institution (fractionalized)
-* DE: Author keywords
+TBD.
 
-Ok, my very condensed interpretation:
 
-* com1: IS, National & sectoral, evolutionary economics, industrial dynamics
-* com2: The core of sustainability transitions. Results very similar to the corresponding community in Rakas & Hain (2018)
-* com3: Climate change adaption, resilience, governance (not an expert in this literature)
-* com4: Sustainable consumption, more behavorial, sociology
-* com5: Real enviromental science
-* com6: Product-Service systems (interesting concept, honestly never heard of till now)
+### Research Area 3
 
-One small sidenote: There is no real economics community to be found.
+#### Most central authors, journals, institutions, most cited references
+```{r}
+M1 %>% gen_summary(top_n = 10, level = "PUB", what = "general", plot = TRUE, select_com = 3)
+```
+
+#### Most central publications
+
+```{r}
+M1 %>% gen_summary(top_n = 10, level = "PUB", what = "top", plot = TRUE, select_com = 3) 
+```
+
+#### Summary
+
+TBD.
+
+
+### Research Area 4
+
+#### Most central authors, journals, institutions, most cited references
+```{r}
+M1 %>% gen_summary(top_n = 10, level = "PUB", what = "general", plot = TRUE, select_com = 4)
+```
+
+#### Most central publications
+
+```{r}
+M1 %>% gen_summary(top_n = 10, level = "PUB", what = "top", plot = TRUE, select_com = 4) 
+```
+
+#### Summary
+
+TBD.
+
+
+### Research Area 5
+
+#### Most central authors, journals, institutions, most cited references
+```{r}
+M1 %>% gen_summary(top_n = 10, level = "PUB", what = "general", plot = TRUE, select_com = 5)
+```
+
+#### Most central publications
+
+```{r}
+M1 %>% gen_summary(top_n = 10, level = "PUB", what = "top", plot = TRUE, select_com = 5) 
+```
+
+#### Summary
+
+TBD.
+
+### Research Area 6
+
+#### Most central authors, journals, institutions, most cited references
+```{r}
+M1 %>% gen_summary(top_n = 10, level = "PUB", what = "general", plot = TRUE, select_com = 6)
+```
+
+#### Most central publications
+
+```{r}
+M1 %>% gen_summary(top_n = 10, level = "PUB", what = "top", plot = TRUE, select_com = 6) 
+```
+
+#### Summary
+
+TBD.
+
+
+### Research Area 7
+
+#### Most central authors, journals, institutions, most cited references
+```{r}
+M1 %>% gen_summary(top_n = 10, level = "PUB", what = "general", plot = TRUE, select_com = 7)
+```
+
+#### Most central publications
+
+```{r}
+M1 %>% gen_summary(top_n = 10, level = "PUB", what = "top", plot = TRUE, select_com = 7) 
+```
+
+#### Summary
+
+TBD.
 
 ## Connectivity between the research areas
-
 ```{r}
-g <- readRDS("temp/g_bib.RDS")
-g.agg <- readRDS("temp/g_agg.RDS")
+g.agg <- readRDS("temp/g_bib_agg.RDS")
 ```
 
 ```{r}
@@ -447,12 +564,14 @@ g.agg %E>%
   ggraph(layout = "circle") + 
   geom_edge_arc(curvature = 0.075, aes(width = weight), alpha = 0.2)  + 
   geom_node_point(aes(size = N, color = dgr)  )  + 
-  geom_node_text(aes(label = as.character(com)), repel = TRUE) 
+  geom_node_text(aes(label = as.character(com)), repel = TRUE) +
+  theme_graph(base_family = "Arial")
 ```
 
-Ok, just to get a first glance, should not be overinterpreted. We see sustainability transition to be the most central community (not surprising, keeping in mind how the corpus is generated). More interestingly, it appears to be strongly connected to IS, climate change adaption  and sustainable consumption literature, less so to enviromental science and PSS. 
 
-## Zooming in the systainability transitions community
+
+
+# Zooming in the systainability transitions community
 
 ```{r}
 M2 <- M %>%
@@ -460,121 +579,219 @@ M2 <- M %>%
   select(-com, -dgr_int) %>%
   rename(com = com2,
          dgr_int = dgr_int2)
+
+g <- readRDS("temp/g_bib.RDS")
+
+gx <- g %N>%
+  filter(com == 2) %>%
+  filter(TC >= 5 & NR >= 5) %>%
+  mutate(SR = SR %>% str_remove("'"),
+         dgr_ext = dgr - dgr_int)
+
+gxi <- list()
+for(i in 1:length(gx %N>% distinct(com2) %>% pull())){ # i = 1  
+  require(ggiraph)  
+  x <- gx %N>%
+    filter(com2 == i) %>%
+    arrange(desc(dgr_int)) %>% 
+    slice(1:100) %E>%
+    filter(weight >= quantile(weight, 0.75) )
+  
+   gxi[[i]]<- x %>%
+    ggraph(layout = 'fr') +
+    geom_edge_arc(curvature = 0.1, aes(width = weight), alpha = 0.1)  + 
+    geom_node_point(aes(colour = dgr_ext, size = dgr_int)  )  +
+    geom_point_interactive(aes(x, y,
+                               tooltip = SR, data_id = name, 
+                               size = dgr_int), alpha = 0.01) +
+    theme_graph(base_family = "Arial") +  
+    labs(title = paste0("ST sub-community: ", i),
+         subtitle = "Top-100 most internally central publications")
+}
+rm(gx, x, i)
 ```
 
-In the first scan it can clearly be seen, that the core of the sustainability transitions community resides in **com2**. So, lets zoom in a bit there and look at its internal structure. 
+```{r, fig.width=15, fig.height=15}
+# g  %>%
+#   ggraph(layout = "fr") + 
+#   geom_edge_density(aes(fill = weight)) +
+#   geom_edge_arc(curvature = 0.1, aes(width = weight), alpha = 0.2)  + 
+#   geom_node_point(aes(colour = factor(com2), size = dgr_int)  )  + 
+#   geom_node_text(aes(label = SR), repel = TRUE) +
+#   scale_color_brewer(palette = "Set1") +
+#     theme_graph(base_family = "Arial")
+```
 
-So, I did a second round of community detection inside **com2** to identify the sub-communities within sustainability transitions. Lets see what we find...
+In the first scan it can clearly be seen, that the core of the sustainability transitions community resides in **com2**. So, lets zoom in a bit there and look at its internal structure.  So, I did a second round of community detection inside **com2** to identify the sub-communities within sustainability transitions. Lets see what we find. 
 
 ```{r}
 M2 %>%
   group_by(com) %>%
   summarise(n = n(), density_int = ((sum(dgr_int) / (n() * (n() - 1))) * 100) %>% round(3)) %>%
   select(com, everything())
+
 ```
 
-We here find 4 sub-communities of rather equal size. Lets characterize them...
+In this case, we find 6 ST internal communities.
+
+```{r, fig.width = 15, fig.height=7.5}
+M2 %>%
+  mutate(PY = PY %>% as.numeric()) %>%
+  group_by(com, PY) %>% summarise(n = n()) %>% ungroup() %>%
+  group_by(PY) %>% mutate(n.PY = sum(n)) %>% ungroup() %>%
+  mutate(n.rel = n / n.PY) %>%
+  select(com, PY, n, n.rel) %>%
+  filter(PY >= 1990 & PY <= 2017) %>% 
+  arrange(com, PY) %>% plot_summary_timeline(y1 = n, y2 = n.rel, by = com, label = TRUE,
+                               y1_text = "Number publications annually", 
+                               y2_text = "Share of publications annually")
+```
+
+Lets look at them again one-by-one
+
+## ST internal Research Areas in detail {.tabset}
+
+### Research Area 1
+
+#### Most central authors, journals, institutions, most cited references
+```{r}
+M2 %>% gen_summary(top_n = 10, level = "PUB", what = "general", plot = TRUE, select_com = 1)
+```
+
+#### Most central publications
 
 ```{r}
-M2 %<>% 
-  filter(TC >= 10 | TC_year >= 5) %>%
-  filter(PY >= 1980 & PY <= 2019) %>%
-  filter(NR >= 10 & NR <= 750) %>%
-  filter( !(DT %in% c("Review", "Conference Paper")) )
+M2 %>% gen_summary(top_n = 10, level = "PUB", what = "top", plot = TRUE, select_com = 1) 
 ```
 
-### Most central publications per research area
+#### Internal network structure
 
 ```{r}
-M2 %>% select(com, AU1, PY, SO, TI, dgr_int) %>%
-  group_by(com) %>% arrange(desc(dgr_int)) %>%
-  slice(1:10) %>% ungroup() %>% mutate(TI = TI %>% str_trunc(100)) %>%
-  kable() %>% kable_styling(full_width = TRUE, font_size = 9) %>%
-  row_spec(c(10,20,30), extra_css = "border-bottom: 2px solid")
+girafe(ggobj = gxi[[1]], width_svg = 8, height_svg = 6) %>% 
+    girafe_options(opts_zoom(max = 4), opts_tooltip(opacity = 0.7) )
 ```
 
-I know to little about the internal dynamics in the field, but hope that makes somewhat sense...
+#### Summary
 
-### Most central journals, authors, institutions, countries
+TBD.
+
+
+### Research Area 2
+
+#### Most central authors, journals, institutions, most cited references
+```{r}
+M2 %>% gen_summary(top_n = 10, level = "PUB", what = "general", plot = TRUE, select_com = 2)
+```
+
+#### Most central publications
 
 ```{r}
-M2.nw.sum <-M2 %>% 
-  unnest(AU) %>% drop_na(AU) %>% clean_AU() %>%
-  group_by(EID, AU) %>% mutate(dgr_int_frac = dgr_int / n()) %>% ungroup() %>%
-  group_by(com, AU) %>% summarise(dgr_int_frac = sum(dgr_int_frac)) %>% ungroup() %>%
-  group_by(com) %>% arrange(desc(dgr_int_frac)) %>% slice(1:10) %>% ungroup() %>%
-  select(com, AU, dgr_int_frac) %>%
-    bind_cols(
-    M2 %>% select(com, CR) %>%
-      unnest(CR) %>% mutate(CR = paste0(CR_AU1, " (" , CR_PY, ") ", CR_SO %>% str_trunc(35) ) )  %>% drop_na(CR_SID) %>%
-      group_by(com, CR) %>% summarise(n = n()) %>% ungroup() %>%
-      group_by(com) %>% arrange(desc(n)) %>% slice(1:10) %>% ungroup() %>%
-      select(CR, n)
-    ) %>%
-  bind_cols(
-    M2 %>% select(com, EID, SO, dgr_int) %>%
-      group_by(com, SO) %>% summarise(dgr_int = sum(dgr_int)) %>% ungroup() %>%
-      group_by(com) %>% arrange(desc(dgr_int)) %>% slice(1:10) %>% ungroup() %>%
-      mutate(SO = SO %>% str_trunc(35)) %>%
-      select(SO, dgr_int)
-  ) %>%
-  bind_cols(
-    M2 %>% select(com, EID, dgr_int, C1) %>%
-      unnest(C1) %>% unnest(C1) %>% drop_na(C1) %>%
-      group_by(EID, C1) %>% mutate(dgr_int_frac = dgr_int / n()) %>% ungroup() %>%
-      group_by(com, C1) %>% summarise(dgr_int_frac = sum(dgr_int_frac)) %>% ungroup() %>%
-      group_by(com) %>% arrange(desc(dgr_int_frac)) %>% slice(1:10) %>% ungroup() %>%
-      mutate(C1 = C1 %>% str_trunc(35)) %>%
-      select(C1, dgr_int_frac)
-  ) %>%
-  bind_cols(
-    M2 %>% select(com, EID, dgr_int, DE) %>%
-      unnest(DE) %>% drop_na(DE) %>%
-      group_by(com, DE) %>% summarise(dgr_int = sum(dgr_int)) %>% ungroup() %>%
-      group_by(com) %>% arrange(desc(dgr_int)) %>% slice(1:10) %>% ungroup() %>%
-      select(DE, dgr_int)
-  ) %>%
-  mutate_at(.vars = vars(contains("_int")), round, digits = 0) 
-
-colnames(M2.nw.sum)  %<>% str_replace("[:digit:]+", "") %>% str_replace("_int", "") %>% str_replace("_frac", ".f")
-
-M2.nw.sum %>% kable() %>% kable_styling(full_width = TRUE, font_size = 8) %>%
-  column_spec(c(1, 3, 5, 7, 9), border_right = T) %>%
-  row_spec(c(10, 20, 30), extra_css = "border-bottom: 2px solid")
+M2 %>% gen_summary(top_n = 10, level = "PUB", what = "top", plot = TRUE, select_com = 2) 
 ```
 
-For ne it seems as if there are differences, but I guess one has to look closer. Is that helpful?
-
-### Internal network
-
-Finally, we can take a look at the most central publications (tob 50) in the community via a network plot.
+#### Internal network structure
 
 ```{r}
-g2 <- g %N>%
-  filter(TC >= 5 & NR >= 5) %>%
-  filter( !(DT %in% c("Review", "Conference Paper")) ) %>% 
-  filter(com == 2) %>%
-  arrange(desc(dgr_int)) %>% 
-  slice(1:50) %E>%
-  filter(weight >= quantile(weight, 0.75) )
-
-#%N>%  filter(centrality_degree(weights = weight) > 0)
+girafe(ggobj = gxi[[2]], width_svg = 8, height_svg = 6) %>% 
+    girafe_options(opts_zoom(max = 4), opts_tooltip(opacity = 0.7) )
 ```
 
-```{r, fig.width=15, fig.height=15}
-g2  %>%
-  ggraph(layout = "fr") + 
-  geom_edge_density(aes(fill = weight)) +
-  geom_edge_arc(curvature = 0.1, aes(width = weight), alpha = 0.2)  + 
-  geom_node_point(aes(colour = factor(com2), size = dgr_int)  )  + 
-  geom_node_text(aes(label = SR), repel = TRUE) +
-  scale_color_brewer(palette = "Set1") 
+#### Summary
+
+TBD.
+
+### Research Area 3
+
+#### Most central authors, journals, institutions, most cited references
+```{r}
+M2 %>% gen_summary(top_n = 10, level = "PUB", what = "general", plot = TRUE, select_com = 3)
 ```
 
-# Topic modelling
+#### Most central publications
 
-still to-do
+```{r}
+M2 %>% gen_summary(top_n = 10, level = "PUB", what = "top", plot = TRUE, select_com = 3) 
+```
 
-# 2-Mode dynamics
+#### Internal network structure
 
-still to-do
+```{r}
+girafe(ggobj = gxi[[3]], width_svg = 8, height_svg = 6) %>% 
+    girafe_options(opts_zoom(max = 4), opts_tooltip(opacity = 0.7) )
+```
+
+#### Summary
+
+TBD.
+
+### Research Area 4
+
+#### Most central authors, journals, institutions, most cited references
+```{r}
+M2 %>% gen_summary(top_n = 10, level = "PUB", what = "general", plot = TRUE, select_com = 4)
+```
+
+#### Most central publications
+
+```{r}
+M2 %>% gen_summary(top_n = 10, level = "PUB", what = "top", plot = TRUE, select_com = 4) 
+```
+
+#### Internal network structure
+
+```{r}
+girafe(ggobj = gxi[[4]], width_svg = 8, height_svg = 6) %>% 
+    girafe_options(opts_zoom(max = 4), opts_tooltip(opacity = 0.7) )
+```
+
+#### Summary
+
+TBD.
+
+### Research Area 5
+
+#### Most central authors, journals, institutions, most cited references
+```{r}
+M2 %>% gen_summary(top_n = 10, level = "PUB", what = "general", plot = TRUE, select_com = 5)
+```
+
+#### Most central publications
+
+```{r}
+M2 %>% gen_summary(top_n = 10, level = "PUB", what = "top", plot = TRUE, select_com = 5) 
+```
+
+#### Internal network structure
+
+```{r}
+girafe(ggobj = gxi[[5]], width_svg = 8, height_svg = 6) %>% 
+    girafe_options(opts_zoom(max = 4), opts_tooltip(opacity = 0.7) )
+```
+
+#### Summary
+
+TBD.
+
+### Research Area 6
+
+#### Most central authors, journals, institutions, most cited references
+```{r}
+M2 %>% gen_summary(top_n = 10, level = "PUB", what = "general", plot = TRUE, select_com = 6)
+```
+
+#### Most central publications
+
+```{r}
+M2 %>% gen_summary(top_n = 10, level = "PUB", what = "top", plot = TRUE, select_com = 6) 
+```
+
+#### Internal network structure
+
+```{r}
+girafe(ggobj = gxi[[6]], width_svg = 8, height_svg = 6) %>% 
+    girafe_options(opts_zoom(max = 4), opts_tooltip(opacity = 0.7) )
+```
+
+#### Summary
+
+TBD.

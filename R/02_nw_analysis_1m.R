@@ -11,8 +11,6 @@ source("functions/functions_nw.R")
 library(Matrix)
 require(igraph)
 require(tidygraph)
-require(ggraph)
-require(ggiraph)
 
 set.seed(1337)
 # TODO
@@ -60,18 +58,26 @@ M <- readRDS("temp/M_comleted.RDS")
 mat <- readRDS("temp/mat_art.RDS")
 
 ### Convert to igraph
-g <- graph_from_adjacency_matrix(mat, mode = "undirected", weighted = TRUE, diag = FALSE)  %>% 
-  as_tbl_graph() %E>% 
-  filter(weight > 0 & from != to) %N>%
-  left_join(M %>% select(EID, SR, PY, NR, TC, DT), by = c("name" = "EID"))
+g <- graph_from_adjacency_matrix(mat, mode = "undirected", weighted = TRUE, diag = FALSE) %>% 
+  as_tbl_graph(directed = FALSE)  %N>%
+  left_join(M %>% select(EID, SR, PY, NR, TC, DT), by = c("name" = "EID")) %>%
+  mutate(id = 1:n())%E>% 
+  filter(weight > 0 & from != to)
+rm(mat)
+
+# g <- g %E>% 
+#   mutate(from_EID = .N()$name[from],
+#          to_EID = .N()$name[to]) 
 
 ### Weighting the edges: JACCARD v# NOte: Alternative, to consider
 g <- g %E>%
   mutate(weight.count = weight) %>%
-  left_join((. %N>% as_tibble() %>% rename(NR_from = NR)), by = c("from" = "name")  ) %>%
-  left_join((. %N>% as_tibble() %>% rename(NR_to = NR)), by = c("to" = "name")  ) %>%  
-  mutate(weight = weight.count / (NR_from + NR_to - weight.count) ) %>%
-  mutate(weight = weight %>% round(3))
+  mutate(weight = weight.count / (.N()$NR[from] + .N()$NR[to] - weight.count) ) %>%
+  mutate(weight = weight %>% round(3)) 
+
+# left_join((. %N>% as_tibble() %>% select(id, NR) %>% rename(NR_from = NR)), by = c("from" = "id")  ) %>%
+# left_join((. %N>% as_tibble() %>% select(id, NR) %>% rename(NR_to = NR)), by = c("to" = "id")  ) %>%  
+
 
 ### Reduce the graph
 g <- g %E>%
@@ -125,61 +131,33 @@ merge <- g %N>%
   rename(EID = name) %>%
   select(EID, dgr, com, dgr_int, com2, dgr_int2)
 
-M %<>% inner_join(merge, by = "EID") %>%
+M %<>% select(EID) %>% left_join(merge, by = "EID") %>%
   distinct(EID, .keep_all = TRUE) 
 
 saveRDS(M, "temp/M_nw.RDS")
 
+#####################################################################################################
+### Aggregated
+#####################################################################################################
 
-
-### visual exploration
-rm(list=ls())
-g <- readRDS("temp/g_bib.RDS")
-
-g.com <- g %N>%
-  filter(TC >= 5 & NR >= 5) %>%
-  filter( !(DT %in% c("Review", "Conference Paper")) ) %>% 
-  filter(com == 2) %>%
-  arrange(desc(dgr_int)) %>% 
-  slice(1:50) %E>%
-  filter(weight >= quantile(weight, 0.75) ) %N>% 
-  filter(centrality_degree(weights = weight) > 0)
-
-g.com  %>%
-  ggraph(layout = "fr") + 
-#  geom_edge_density(aes(fill = weight)) +
-  geom_edge_arc(curvature = 0.1, aes(width = weight), alpha = 0.2)  + 
-  geom_node_point(aes(colour = factor(com2), size = dgr_int)  )  + 
-  geom_node_text(aes(label = SR), repel = TRUE) +
-  scale_color_brewer(palette = "Set1") + 
-  theme_graph() 
-
-# Com level
+# NEeds some check up
 require(RNewsflow)
 g.agg <- g %>%
   network.aggregate(by = "com", edge.attribute = "weight", agg.FUN = sum)  %>%
   as.undirected(mode = "collapse", edge.attr.comb = "sum") %>%
-  as_tbl_graph() %N>%
-  select(-name) %E>%
+  as_tbl_graph(directed = FALSE) %N>%
+  select(-name) %>%
+  mutate(id = 1:n()) %E>%
   rename(weight = agg.weight) %>%
   select(from, to, weight)
 
 g.agg <- g.agg %E>%
-  left_join((. %N>% as_tibble() %>% rename(N_from = N)), by = c("from" = "com")  ) %>%
-  left_join((. %N>% as_tibble() %>% rename(N_to = N)), by = c("to" = "com")  ) %>%  
   rename(weight_count = weight) %>%
-  mutate(weight = weight_count / (N_from * N_to) ) %>%
+  mutate(weight = weight_count / (.N()$N[from] * .N()$N[to]) ) %>%
   mutate(weight = (weight * 100) %>% round(4)) %N>%
   mutate(dgr = centrality_degree(weights = weight))
 
-g.agg %E>% 
-  filter(weight > 0 & from != to) %>%
-  filter(weight >= quantile(weight, 0.25) )  %>%
-  ggraph(layout = "circle") + 
-  geom_edge_arc(curvature = 0.075, aes(width = weight), alpha = 0.2)  + 
-  geom_node_point(aes(size = N, color = dgr)  )  + 
-  geom_node_text(aes(label = as.character(com)), repel = TRUE) +
-  theme_graph() 
+saveRDS(g.agg, "temp/g_bib_agg.RDS")
 
 #####################################################################################################
 # Co-Citation network
@@ -195,9 +173,10 @@ C <- readRDS("temp/C_data.RDS")
 
 ### Convert to igraph
 g <- graph_from_adjacency_matrix(mat, mode = "undirected", weighted = TRUE, diag = FALSE)  %>% 
-  as_tbl_graph() %E>% 
-  filter(weight > 0 & from != to) %N>%
-  left_join(C %>% select(SID, SR, PY, TC), by = c("name" = "SID"))
+  as_tbl_graph(directed = FALSE) %N>%
+  left_join(C %>% select(SID, SR, PY, TC), by = c("name" = "SID")) %>%
+  mutate(id = 1:n()) %E>% 
+  filter(from != to)
 
 # ### Weighting the edges: No jaccard, only normalization
 g <- g %E>%
@@ -242,3 +221,31 @@ C %<>% inner_join(merge, by = "SID") %>%
   distinct(SID, .keep_all = TRUE) 
 
 saveRDS(C, file="temp/C_nw.RDS")
+
+#####################################################################################################
+### Aggregated
+#####################################################################################################
+
+g <- readRDS("temp/g_cit.RDS")
+
+# Com level
+require(RNewsflow)
+g.agg <- g %>%
+  network.aggregate(by = "com", edge.attribute = "weight", agg.FUN = sum)  %>%
+  as.undirected(mode = "collapse", edge.attr.comb = "sum") %>%
+  as_tbl_graph() %N>%
+  select(-name) %>%
+  mutate(id = 1:n())%E>%
+  rename(weight = agg.weight) %>%
+  select(from, to, weight)
+
+g.agg <- g.agg %E>%
+  left_join((. %N>% as_tibble() %>% rename(N_from = N)), by = c("from" = "id")  ) %>%
+  left_join((. %N>% as_tibble() %>% rename(N_to = N)), by = c("to" = "id")  ) %>%  
+  rename(weight_count = weight) %>%
+  mutate(weight = weight_count / (N_from * N_to) ) %>%
+  mutate(weight = (weight * 100) %>% round(4)) %N>%
+  mutate(dgr = centrality_degree(weights = weight))
+
+saveRDS(g.agg, "temp/g_cit_agg.RDS")
+
