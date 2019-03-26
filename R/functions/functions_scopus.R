@@ -393,7 +393,7 @@ scopus_extract_SC <- function(x, index, level = "document"){
     list.select(SC = `subject-areas`$`subject-area`) %>%
     map("SC") %>% 
     {tibble(EID = index,
-            SC = map_depth(., 2, flatten) %>% map_depth(2, "$") %>% map_depth(2, replace_NULL) %>% map(unlist),
+            SC = map_depth(., 2, unlist) %>% map_depth(2, "$") %>% map_depth(2, replace_NULL) %>% map(unlist),
             SC_ID = map_depth(., 2, unlist) %>% map_depth(2, "@code") %>% map_depth(2, replace_NULL) %>% map(unlist),
             SC_CODE = map_depth(., 2, unlist) %>% map_depth(2, "@abbrev") %>% map_depth(2, replace_NULL) %>% map(unlist) 
     ) } %>% replace_NULL()

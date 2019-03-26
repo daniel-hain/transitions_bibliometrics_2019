@@ -10,61 +10,44 @@ source("C:/Users/Admin/R_functions/preamble.R")
 rm(list=ls()); graphics.off()
 source("functions/functions_scopus.R")
 
+file_list <- c("input/00_search_string.txt", "input/00_seed.txt")
 
-test <- fread("input/scopus_geels2004.txt")
+M.base <- read_scopus_collection(file_list, TC_min = 1, TC_year_min = 0, PY_max = 2019, PY_min = 1998, 
+                                 type = "reduced", exclude = c(DT = "Conference Paper")) 
 
-file_list <- c("input/scopus_search_string.csv", "input/scopus_search_manual.csv")
 
-M.base <- read_scopus_csv_collection(file_list, TC_min = 1, TC_year_min = 0.25, PY_max = 2019, PY_min = 1970)
-
-# Define which ones we want to manually deselect
-select.neg <- c("2-s2.0-33845930247", # "TRANSITIONS TOWARDS ADAPTIVE MANAGEMENT OF WATER FACING CLIMATE AND GLOBAL CHANGE",
-                "2-s2.0-0347682362", # "TECHNOLOGY ROADMAPPING - A PLANNING FRAMEWORK FOR EVOLUTION AND REVOLUTION",
-                "2-s2.0-84857938593", #"GLOBAL ENVIRONMENTAL CHANGE II: FROM ADAPTATION TO DELIBERATE TRANSFORMATION",
-                "2-s2.0-84922465409", #"RECONCEPTUALISING ADAPTATION TO CLIMATE CHANGE AS PART OF PATHWAYS OF CHANGE AND RESPONSE",
-                "2-s2.0-84861676296", #"OVERCOMING THE TRAGEDY OF SUPER WICKED PROBLEMS: CONSTRAINING OUR FUTURE SELVES TO AMELIORATE GLOBAL CLIMATE CHANGE",
-                "2-s2.0-84938943029", #"ECOLOGY IN AN ANTHROPOGENIC BIOSPHERE",
-                "2-s2.0-84977513357" # "ENERGY, LAND-USE AND GREENHOUSE GAS EMISSIONS TRAJECTORIES UNDER A GREEN GROWTH PARADIGM"
-                )
-
-# Selection of seed articles
-select1 <- M.base %>%
-  filter(!(EID %in% select.neg)) %>%
-  filter(TC >= quantile(.$TC,0.98) | (TC_year >= quantile(.$TC_year,0.98) ) ) 
-
-select2 <- M.base %>%
-  filter(!(EID %in% select.neg)) %>%
-  filter(PY >= 2015 & PY < 2018)  %>% 
-  arrange(PY, desc(TC)) %>%
-  group_by(PY)%>%
-  slice(1:3) %>%
-  ungroup() 
-
-select <- select1 %>%
-  bind_rows(select2) %>%
-  distinct(EID, .keep_all = TRUE) %>%
+# adjust TC to 2018
+M.base %<>%
   arrange(desc(TC)) %>%
-  select(EID, AU1, TI, JI, PY, TC, TC_year)
+  mutate(PY = ifelse(PY > 2018, 2018, PY)) %>%
+  mutate(TC_year = TC / (2018 - PY + 1)  )
+
+# Export top-100 TC
+M.TC <- M.base %>% 
+  arrange(desc(TC)) %>%
+  mutate(percentile_TC = (rank(TC) / n()) %>% round(2),
+         percentile_TCyear = (rank(TC_year) / n()) %>% round(2),
+         AU = AU %>% as.character()) %>%
+  select(EID, TC, percentile_TC, TC_year, percentile_TCyear, AU, PY, TI, SO) %>%
+  slice(1:100) 
+write_csv(M.TC, "temp/string_top100_TC.csv")
+
+# Export top-100 TC/year
+M.TC_year <- M.base %>% 
+  arrange(desc(TC_year)) %>%
+  mutate(percentile_TC = (rank(TC) / n()) %>% round(2),
+         percentile_TCyear = (rank(TC_year) / n()) %>% round(2),
+         AU = AU %>% as.character()) %>%
+  select(EID, TC, percentile_TC, TC_year, percentile_TCyear, AU, PY, TI, SO) %>%
+  slice(1:100) 
+write_csv(M.TC_year, "temp/string_top100_TCyear.csv")
+rm(M.TC,M.TC_year)
 
 ### First reduction for merging
 M.base %<>%
-  filter(TC >= 1) %>%
-  filter( TC >= quantile(.$TC, 0.50) | 
-            TC_year >= quantile(.$TC_year, 0.50) | 
-            EID %in% (select %>% pull(EID) )  ) 
+  filter( TC >= quantile(.$TC, 0.50) | TC_year >= quantile(.$TC_year, 0.50) ) 
 
-saveRDS(select, "output/seed_papers.RDS") 
 saveRDS(M.base, "temp/M_base.RDS") 
-
-
-# for now:
-M.select <- M.base %>%
-  select(EID, AU1, PY, TI, SO, TC, TC_year) %>%
-  mutate(seed_current = EID %in% (select %>% pull(EID)) %>% as.numeric()) %>%
-  arrange(desc(seed_current), desc(TC), (desc(TC_year))) %>%
-  slice(1:100)
-write_csv(M.select, "temp/seed_select.csv")
-
 
 ############################################################################
 # Save all the Abstracts in SQL
@@ -77,11 +60,7 @@ library(RSQLite)
 library(dbplyr)
 
 ### Load all abstracts available
-file_list <- fread("input/000_seed_index.csv")
-index <- file_list %>% na_if("") %>% drop_na(index) %>% distinct(index)  %>% pull() 
-index <- paste0("input/", index, ".txt")
-
-M <- fread(index[1])
+index <- list.files(path = "input", pattern = "\\.txt", all.files = FALSE, full.names = TRUE)
 
 M <- read_scopus_collection(index, fields = c("EID", "TI", "DE", "ID", "AB") )
 
@@ -93,7 +72,6 @@ M %<>%
 M %<>% 
   drop_na(EID, AB) %>%
   arrange(EID) 
-
 
 ### Load in the sql
 db <- dbConnect(RSQLite::SQLite(), "output/bliographics.sqlite")

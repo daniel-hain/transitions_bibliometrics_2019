@@ -34,20 +34,25 @@ require(stopwords)
 # TODO: MAke a proper stem-completion instead
 data %<>% 
   mutate(TXT = paste(TI, DE, AB, sep = " ")) %>% 
-  select(-TI, -AB) %>%
   mutate(TXT = TXT %>% 
            str_replace_all("&", "-and-") %>%
-           str_replace_all("/(&trade;|&reg;|&copy;|&#8482;|&#174;|&#169;)/.*", "") %>%
-           str_replace_all("elsevier.*", "") %>%
+           str_remove_all("/(&trade;|&reg;|&copy;|&#8482;|&#174;|&#169;)/.*") %>%
            str_squish() %>%
-           iconv(to = "UTF-8", sub = "byte")
-           )  
+           iconv(to = "UTF-8", sub = "byte") %>%
+           str_remove("�.*") 
+           )  %>%
+  select(EID, TXT) %>%
+  drop_na()
 
 ###########################################################################
 # Generate and manipulate copus
 ###########################################################################
 
-lemma_dict <- readRDS("temp/lemma_dictionary.RDS")
+lemma_dict <- readRDS("temp/lemma_dictionary.RDS") %>% 
+  mutate_all(as.character) %>%
+  mutate(stem = stem %>% iconv(to = "UTF-8", sub = "byte"))
+lemma_dict <- lemma_dict[-1,]
+  
 lemma_own <- tibble(
   stem = c("institution",   "technology",    "nation",   "region",   "sustainability", "environment",   "policy"),
   term = c("institutional", "technological", "national", "regional", "sustainable",    "environmental", "political") )
@@ -58,7 +63,8 @@ stopwords_dict <- c(stop_words %>% pull(word), stopwords("en","snowball"), stopw
 stopwords_own <- c("study", "paper", "result", "model", "approach", "article", "author", "method", "understand", "focus", "examine", "aim", "argue", "identify",
                    "increase", "datum", "potential", "explore", "include", "issue", "propose", "address", "apply", "require", "analyse", "relate", "finding",
                    "analyze", "discuss", "contribute", "publish", "involve", "draw", "lead", "exist", "set", "reduce", "create", "form", "explain", "play",
-                   "affect", "regard", "associate", "establish", "follow", "conclude", "define", "strong", "attempt", "finally")
+                   "affect", "regard", "associate", "establish", "follow", "conclude", "define", "strong", "attempt", "finally", "elsevier", "offer",
+                   "taylor", "francis", "copyright", "springer", "wiley", "emerald", "copyright")
 stopwords_dict <- c(stopwords_dict, stopwords_own) %>% unique()
 rm(stopwords_own)
 
@@ -68,8 +74,9 @@ rm(data)
 
 # Generate tokens
 toks <- tokens(st_corpus, what = "word") %>%
-  tokens(remove_punct = TRUE, remove_numbers = TRUE, remove_symbols = TRUE) %>%
-  tokens_replace(pattern = lemma_dict %>% pull(term), replacement = lemma_dict %>% pull(stem)) %>%
+  tokens_tolower() %>%
+  tokens(remove_punct = TRUE, remove_numbers = TRUE, remove_symbols = TRUE) %>% 
+  tokens_replace(pattern = (lemma_dict %>% pull(term)), replacement = (lemma_dict %>% pull(stem)), valuetype = "fixed") %>%
   tokens_remove(stopwords_dict) %>%
   tokens_ngrams(n = 1:3) # %>% tokens_wordstem(language = "en") 
 
@@ -88,7 +95,9 @@ topwords <- topfeatures(st_dfm, 500) %>% {tibble(word = names(.), Freq = .)}
 
 # Do the LDA
 lda <- LDA(convert(st_dfm, to = "topicmodels"), k = 10, control = list(seed = 1337))
-# saveRDS(lda, "temp/LDA_res.R"); lda <- readRDS("temp/LDA_res.R")
+# 
+saveRDS(lda, "temp/LDA_res.R"); lda <- readRDS("temp/LDA_res.R")
+saveRDS(st_dfm, "temp/NLP_dfm.RDS")
 
 terms(lda, 10)
 docvars(st_dfm, 'topic') <- topics(lda)
@@ -117,5 +126,5 @@ saveRDS(topics_terms, "temp/topics_terms.RDS")
 ###########################################################################
 
 library(LDAvis)
-json_lda<- topicmodels_json_ldavis(fitted = lda, doc_fm = st_dfm, method = "TSNE")
+json_lda <- topicmodels_json_ldavis(fitted = lda, doc_fm = st_dfm, method = "TSNE", EID_in = (M %>% pull(EID)) )
 serVis(json_lda , out.dir = 'output/viz', open.browser = FALSE)

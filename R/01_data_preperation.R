@@ -1,4 +1,3 @@
-
 ############################################################################
 # TODO list
 ############################################################################
@@ -16,12 +15,9 @@ source("C:/Users/Admin/R_functions/preamble.R")
 rm(list=ls()); graphics.off()
 source("functions/functions_scopus.R")
 
-#file_list <- dir("input")
-#file_list <- file_list[grep("scopus.*[0-9]+.*\\.csv", file_list)] %>% paste("input", . , sep="/") 
 file_list <- fread("input/000_seed_index.csv")
 index <- file_list %>% na_if("") %>% drop_na(index) %>% distinct(index)  %>% pull() 
 index <- paste0("input/", index, ".txt")
-
 
 M <- read_scopus_collection(index, TC_min = 1, TC_year_min = 0.25, PY_max = 2019, PY_min = 1998, n_max = 1000, 
                             type = "reduced", exclude = c(DT = "Conference Paper")) %>% arrange(desc(TC), PY)
@@ -38,10 +34,10 @@ library(httr)
 library(jsonlite)
 library(rlist)
 
-M <- readRDS("temp/M_1.RDS")
 scopus_key <- "79bfa1706e6434d1e36992889ebeb3d5" # or: 	"60c71dc8201d9e13dfac7872fb340130"
 
 ### Abstract update
+M <- readRDS("temp/M_1.RDS")
 M.scopus_full <- readRDS("output/M_scopus_full_raw.RDS")
 
 EID_select <- M %>% select(EID)
@@ -102,22 +98,22 @@ cit_el <- M.scopus_full %>%
   map("REF")  %>% map_depth(2, "ref-info") %>% 
   {tibble(EID = EID_index,
           CR_SID  = map_depth(.,2, "refd-itemidlist") %>% map_depth(2, "itemid") %>% map_depth(2, "$") %>%
-            map_depth(2, replace_NULL) %>% map(flatten),
+            map_depth(2, replace_NULL) %>% map(unlist),
           CR_PY = map_depth(.,2, "ref-publicationyear") %>% map_depth(2, "@first") %>%
-            map_depth(2, replace_NULL) %>% map(flatten),
+            map_depth(2, replace_NULL) %>% map(unlist),
           CR_TI  = map_depth(., 2, "ref-title") %>% map_depth(2, "ref-titletext") %>%
-            map_depth(2, replace_NULL) %>% map(flatten),
+            map_depth(2, replace_NULL) %>% map(unlist),
           CR_SO  = map_depth(., 2, "ref-sourcetitle") %>%
-            map_depth(2, replace_NULL) %>% map(flatten),
+            map_depth(2, replace_NULL) %>% map(unlist),
           CR_AU  = map_depth(., 2, "ref-authors") %>%  map_depth(2, "author") %>%  map_depth(3, "ce:indexed-name") %>% 
-            map_depth(3, replace_NULL) %>% map_depth(2, flatten) # Note : Paste nly till dplyr fixed
-          ) } 
+            map_depth(3, replace_NULL) %>% map_depth(2, unlist) # Note : Paste nly till dplyr fixed
+          ) } %>%
+  replace_NULL() 
 
 cit_el %<>%
-  replace_NULL() %>%
   unnest() %>%
   mutate(CR_SID = as.character(CR_SID) %>% str_squish(),
-         CR_PY = CR_PY %>% as.character(),
+         CR_PY = CR_PY %>% as.character() %>% as.numeric(),
          CR_TI = as.character(CR_TI) %>% str_squish(),
          CR_SO = as.character(CR_SO) %>% str_squish()) %>%
   drop_na(EID, CR_SID) %>%
@@ -126,7 +122,9 @@ cit_el %<>%
   group_by(CR_SID) %>% mutate(CR_TC = n()) %>% ungroup() %>% filter(CR_TC >= 2) %>%
   group_by(EID) %>% mutate(NR = n()) %>% ungroup() %>% filter(NR >= 2) 
 
+
 cit_el %<>%
+  mutate(CR_AU = CR_AU %>% map(replace_NULL)) %>%
   rename(AU = CR_AU) %>%
   unnest(AU) %>%
   clean_AU() %>% 
@@ -139,6 +137,10 @@ cit_el %<>%
   replace_NULL() %>%
   drop_na(EID, CR_SID) %>%
   select(EID, CR_SID, CR_PY, CR_AU1, CR_TC, NR, CR_N_AU, CR_TI, CR_SO, CR_AU)
+
+cit_el %<>%
+  drop_na(EID, CR_SID, CR_PY)
+
   
 saveRDS(cit_el, "temp/cit_el.RDS")
 

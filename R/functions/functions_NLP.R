@@ -38,15 +38,28 @@ clean_corpus_tm <- function(corpus, my_stopwords = NULL, stemcomp = FALSE){
 # takes the output of a topicmodel lda and transforms it to ldaviz json
 # TODO: Include option to select only certain documents, topics
 
-topicmodels_json_ldavis <- function(fitted, doc_fm, method = "PCA"){
+topicmodels_json_ldavis <- function(fitted, doc_fm, method = "PCA", EID_in = NULL, topic_in = NULL){
   # Required packages
   library(topicmodels)
   library(dplyr)
   library(LDAvis)
   
   # Find required quantities
-  phi <- posterior(fitted)$terms %>% as.matrix
-  theta <- posterior(fitted)$topics %>% as.matrix
+  phi <- posterior(fitted)$terms %>% as.matrix # Topic-term distribution
+  theta <- posterior(fitted)$topics %>% as.matrix # Document-topic matrix
+  
+  # Restrict
+  if(!is_null(EID_in)){
+    theta <- theta[rownames(theta) %in%  EID_in,]
+    doc_fm  %<>% dfm_subset(dimnames(doc_fm)$docs %in% EID_in)
+  }
+  
+  # Restrict
+  if(!is_null(topic_in)){
+    phi <- phi[topic_in, ]
+    theta <- theta[ , topic_in]
+  }
+  
   vocab <- colnames(phi)
   doc_length <- tibble(EID = rownames(theta)) %>%
     left_join( tibble(EID = names(ntoken(doc_fm)), n = ntoken(doc_fm)) , by = "EID") 

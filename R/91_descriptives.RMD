@@ -33,6 +33,7 @@ library(knitr) # For display of the markdown
 
 # Loadxtra packages
 library(tidyverse)
+library(data.table)
 library(magrittr)
 library(skimr)
 library(kableExtra) # For table styling
@@ -57,18 +58,24 @@ knitr::opts_chunk$set(echo = FALSE,
 ```
 
 
+<!-- ####################################################################################### -->
+<!-- ####################################################################################### -->
+<!-- ############################# NEXT PART ############################################### -->
+<!-- ####################################################################################### -->
+<!-- ####################################################################################### -->
+
 # Initial Corpus generation & inspection 
 
 ## Corpus Creation
-
-1. Scopus download of documents retrieved from search string from Markard et al. (2012), resulting in ca 2.800 documents. Limited to `LANGUAGE = ENGLISH AND TYPE = (ARTICLE OR CONFERENCE PAPER OR BOOK OR BOOKCHAPTER OR EDITORIAL OR SHORT SURVEY)`.
-2. Selecting "seed" publications. 1% most cited total + 1% most cited per year + top3 cited papers from each 2015-2017. Ex-post manual insertion and exclusion (authority based). Results in 51 seed papers
-3. Retrieving for each seed 1000 publications with most shared references. Again, same limitations as in step 1. Also include tob/1000 cited in the results of step 1.
-4. Adittional ex. post filtering based on citations recieved and connectivity in bibliographic coupling network (see below)
+1. Scopus download of documents retrieved from search string from Markard et al. (2012), resulting in ca 2.800 documents. Limited to `LANGUAGE = ENGLISH AND TYPE = (ARTICLE OR OR BOOK OR BOOKCHAPTER OR EDITORIAL OR SHORT SURVEY)`.
+2. Selecting "seed" publications. 1% most cited total + 1% most cited per year + top3 cited papers from each 2015-2017. Ex-post manual insertion and exclusion (top 1% cited in total + per year, all papers from Markard et al. (2012), all 2011 & 2012special issue in the top-100 most citd, and lastly authority based). Results in 51 seed papers
+3. Retrieving for each seed 1000 publications with most shared references. Again, same limitations as in step 1. Also include top-1000 cited in the results of step 1. I excluded publications with less than on 1 citation per year, and citation before 1998 (start of the field, as we agreed in the last meeting).
+4. Adittional ex. post filterin. First, based on citations recieved and connectivity in bibliographic coupling network. Namely, I excluded edges in the bottom 10% quantile of the weight distribution (Jaccard weighted), also unconnected and nodes in the bottom 10% of the degree distribution. Lastly,after the community detection exercise, I excluded nodes in communities of less than 500 members. 
 
 That leads to an overal corpus size of: 
 ```{r}
 M <- readRDS("temp/M_comleted.RDS")
+
 M %<>% 
   left_join(readRDS("temp/M_nlp.RDS") %>% select(EID, topic), by = "EID") %>%
   inner_join(readRDS("temp/M_nw.RDS") %>% select(EID, dgr, com, dgr_int, com2, dgr_int2), by = "EID") %>%
@@ -79,34 +86,41 @@ cat("Number of unique publications in the final corpus: ", nrow(M))
 
 
 ## Seed Paper {.tabset}
-
 ```{r}
-source("functions/functions_scopus.R")
-seed <- read_scopus("input/00_seed.txt", type = "reduced") %>%
-  arrange(desc(TC), desc(TC_year)) %>%
+seed <- fread("input/000_seed_index.csv") %>%
   mutate(Ti = TI%>% str_trunc(300),
          SO = SO %>% str_trunc(50),
-         SR = paste0(1:n(), ": ", AU1, ", (", PY, ") ", (SO %>% str_trunc(50)), ", Cited: ", TC),
-         n = 1:n()) %>%
-  select(n, AU1, SR, PY, TI, SO, TC, TC_year) 
+         TC_year = (TC / (2018 - PY + 1)) %>% round())  %>%
+  select(AU, PY, TI, SO, TC, TC_year, included, index) 
+
+seed <- seed[-1,] 
+seed %<>% mutate(n = 1:n(),
+                 SR = paste0(n, ": ", AU, ", (", PY, ") ", (SO %>% str_trunc(50)), ", Cited: ", TC, "Cited/year: ", TC_year)) %>% 
+  select(n, SR, everything())
+
+seed[1, "SR"] <- seed[1, "TI"]
 ```
 
-In the following, we more in detail investigate the seed papers. Notice the adittional `tabs` for details.
+In the following, we more in detail investigate the seed papers. Notice the adittional `tabs` for details on ou selection of seed papers.
 
 ### Seep papers and corpus size
 
-Generally, 51 x 1000 = 51.000 documents downloaded. However, due to an overlap of publications with most shared references to seed papers, final corpus is smaller. 
+Generally, 50 x 1000 = 50.000 documents downloaded. However, due to an overlap of publications with most shared references to seed papers, final corpus is smaller. 
 
 ```{r, fig.height=5, fig.width=10}
-# index <- fread("input/000_seed_index.csv") %>% na_if("") %>% drop_na(index) %>% distinct(index)  %>% pull() %>% paste0("input/", ., ".txt")
-# x <- tibble()
-# corpus_size <- tibble(SR = c("Seed Papers", "Top-1000 Markard et al. (2012) string", seed %>% pull(SR))) %>% mutate(count = NA)
-# for(i in 1:length(index)) {
-# y <- read_scopus(index[i], TC_min = 1, TC_year_min = 0.25, PY_max = 2019, PY_min = 1998, n_max = 1000, type = "reduced", exclude = c(DT = "Conference Paper")) %>%
-#   arrange(desc(TC), PY) %>% select(EID)
-# x %<>% rbind(y) %>%  distinct(EID, .keep_all = TRUE)
-# corpus_size[i, "count"] <- nrow(x)} %>%  mutate(n = 1:n()) 
+source("functions/functions_scopus.R")
+
+# index <- seed %>% pull(index); index <- paste0("input/", index, ".txt"); x <- tibble()
+# corpus_size <- tibble(SR = seed %>% pull(SR)) %>% mutate(count = NA)
+# 
+# for(i in 1:length(index)) { # i =1
+#   y <- read_scopus(index[i], TC_min = 1, TC_year_min = 0.25, PY_max = 2019, PY_min = 1998, n_max = 1000,type = "reduced", exclude = c(DT = "Conference Paper")) %>% arrange(desc(TC), PY) %>% select(EID)
+#   x %<>% rbind(y) %>%  distinct(EID, .keep_all = TRUE)
+#   corpus_size[i, "count"] <- nrow(x)
+# }
+# corpus_size %<>%  mutate(n = 1:n()) %<>% select(n, everything())
 # saveRDS(corpus_size, "output/corpus_size.RDS")
+
 corpus_size <- readRDS("output/corpus_size.RDS") 
 
 require(plotly)
@@ -118,21 +132,19 @@ plot <- corpus_size %>%
 plot %>% ggplotly(tooltip = c("SR", "y") )
 ```
 
-First insight: Corpus appears to saturate between 20-40, but then introduced new seed lead to an again expanding corpus. Seems to be more from Ecology and Political Science. Along that lines, it appears the main Sustainability corpus seems saturated, expansion appears more in adjacent fields.
+First insight: It appears the main Sustainability corpus seems saturated, expansion appears more in adjacent fields.
 
 ### List of all seed papers
-
 ```{r}
 seed %>% 
-  select(-SR) %>%
+  select(-SR, -index) %>%
   select(n, everything()) %>%
-  kable() %>% 
+  kable(row.names = FALSE) %>% 
   kable_styling(bootstrap_options = c("striped", "hover", "condensed"), full_width = TRUE, font_size = 10) 
 ```
 
 
 ## Publications
-
 Note: The following tables refer to the documents in the main corpus. Generally, `dgr` refers to the degree, `n` to the number of publications. Subscript `.f` indicates the number is fractionalized (divided by the number of elements per publication)
 
 ```{r}
@@ -140,11 +152,9 @@ M %>% gen_summary(top_n = 20, level = "PUB", what = "count", plot = TRUE)
 ```
 
 ## References cited
-
 ```{r}
 C <- readRDS("temp/C_nw.RDS")
 ```
-
 
 Note: The following tables refer to the **cited references within** the corpus. Number of citation always refers to the citations recieved by the documents in the main corpus.
 
@@ -158,18 +168,24 @@ This appears to be rather low, only slightly more than 2x more than publications
 C %>% gen_summary(top_n = 20, level = "REF", what = "count", plot = TRUE) 
 ```
 
-# Topic modelling
 
+<!-- ####################################################################################### -->
+<!-- ####################################################################################### -->
+<!-- ############################# NEXT PART ############################################### -->
+<!-- ####################################################################################### -->
+<!-- ####################################################################################### -->
+
+
+# Topic modelling
 ```{r}
 el_topic <- readRDS("temp/el_topic.RDS")
 topics_terms <- readRDS("temp/topics_terms.RDS")
 ```
 
-I by now created some topic modelling. The results are somewhat preliminary, but already worth taking a look at. We ran a LDA on the titles + abstracts of our corpus, aiming at identifying 10 topics (some different numbers of topics to generate shows that 10 result in good results, more topics lead to too much overlap between them)
+I by now created some topic modelling. The results are now more fine-tuned, but there is still room for some improvement. We ran a LDA on the titles + abstracts of our corpus, aiming at identifying 10 topics (some different numbers of topics to generate shows that 10 result in good results, more topics lead to too much overlap between them)
 
 ## Topics by topwords
-
-```{r, fig.width=15, fig.height=7.5}
+```{r, fig.width=20, fig.height=17.5}
 topics_terms %<>%
   group_by(topic) %>%
   arrange(topic, desc(beta)) %>%
@@ -183,7 +199,7 @@ mycol <- topics_terms %>% gg_color_select(cat = topic, pal = "Paired")
 topics_terms %>%
   ggplot(aes(order, beta, fill = factor(topic))) +
   geom_col(show.legend = FALSE) +
-  facet_wrap(~ topic, ncol = 5, scales = "free") +
+  facet_wrap(~ topic, ncol = 3, scales = "free") +
   scale_x_continuous(
     breaks = topics_terms$order,
     labels = topics_terms$term,
@@ -196,11 +212,9 @@ topics_terms %>%
 
 This might still be finetuned, but initially doesnt look that bad I think. All the topics for me seem to be somewhat identifiable. We should maybe start naming them to make their interpretation later easier. 
 
-
 ## Topics over time
-
 ```{r, fig.width = 15, fig.height=7.5}
-plot <- el_topic %>%
+el_topic %>%
   select(PY, topic, weight) %>%
   mutate(PY = as.numeric(PY)) %>%
   group_by(PY, topic) %>% summarise(weight = mean(weight)) %>% ungroup() %>%
@@ -208,382 +222,466 @@ plot <- el_topic %>%
   mutate(weight.rel = weight / weight.PY) %>%
   select(PY, topic, weight, weight.rel) %>%
   filter(PY >= 1990 & PY <= 2017) %>%
-  arrange(PY, topic)
-
-plot_summary_timeline(plot, y1 = weight, y2 = weight.rel, by = topic, pal = "Paired", label = TRUE,
-                               y1_text = "Topic popularity annualy", 
-                               y2_text = "Share of topic annually")
-
+  arrange(PY, topic) %>%
+  plot_summary_timeline(y1 = weight, y2 = weight.rel, by = topic, pal = "Paired", label = TRUE, 
+                        y1_text = "Topic popularity annualy", y2_text = "Share of topic annually")
 ```
 
-Here, we see quite  a shift in the discourse over timee. Notably, topic `5` (technology & industry dynamics related) over time lost quite a bit in popularity, while particularly topic `2` (energy & policy), topic `6` (transition management), and topic `9` (policy & governance) gained.
+Here, we see quite  a shift in the discourse over time. 
 
 ## LDAViz
+Here you find a nice way of exploring topics via the `LDAVIz` methodology of visulizing the result of an LDA. It dispolays all topics in a 2 dimensional TSNE (similar to PCA, but optimized for graphical illustration in 2d), and also gives a nice visual representation over the topics top-word distribution and overall frequencies of this words in the corpus. The $\lambda$ parameter regulates the importance-ordering of the topwords. High $\lambda$ order words by the highest propability to appear in the topic to the lowest (independent of the overall word popularity in the corpus), whle low $\lambda$ emphasize words which are very specific to the topic, and rarely appear in others.
 
-Here you find a nice way of exploring topics via the `LDAVIz tool`. It dispolays all topics in a 2 dimensional PCA, and also gives a nice visual representation over the topics top-word distribution and overall frequencies of this words in the corpus. The $\lambda$ parameter regulates the importance-ordering of the topwords. High $\lambda$ order words by the highest propability to appear in the topic to the lowest (independent of the overall word popularity in the corpus), whle low $\lambda$ emphasize words which are very specific to the topic, and rarely appear in others.
-
-Play a bit around. It's a bit condensed here in the small view, but you can also load it [HERE](https://raw.githack.com/daniel-hain/transitions_bibliometrics_2019/master/notebooks/viz/index.html) in fullscreen for a better overview.
+Play a bit around. Since it would be here a bit condensed, better check it out  [HERE](https://raw.githack.com/daniel-hain/transitions_bibliometrics_2019/master/notebooks/viz/index.html) in fullscreen for a better overview.
 
 ```{r}
-# TODO: Super unelegant up to now
-tab <- tibble::tibble(" " = 
- '<link rel="stylesheet" type="text/css" href="https://raw.githack.com/daniel-hain/transitions_bibliometrics_2019/master/notebooks/viz/lda.css">
-  <script src="https://raw.githack.com/daniel-hain/transitions_bibliometrics_2019/master/notebooks/viz/d3.v3.js"></script>
-  <script src="https://raw.githack.com/daniel-hain/transitions_bibliometrics_2019/master/notebooks/viz/ldavis.js"></script>
-  <iframe width="1000" height="750" src="https://raw.githack.com/daniel-hain/transitions_bibliometrics_2019/master/notebooks/viz/index.html" frameborder="0"></iframe>')
-
-#tab <- tibble::tibble(" " = 
-# '<link rel="stylesheet" type="text/css" href="C:/Users/Admin/OneDrive - Aalborg Universitet/01 - Research/01 - Research - Bibliometrics Transistions/analysis/output/viz/lda.css">
-#<script src="C:/Users/Admin/OneDrive - Aalborg Universitet/01 - Research/01 - Research - Bibliometrics Transistions/analysis/output/viz/d3.v3.js"></script>
-#<script src="https://raw.githack.com/daniel-hain/transitions_bibliometrics_2019/master/notebooks/viz/ldavis.js"></script>
-#<iframe width="1000" height="750" src="C:/Users/Admin/OneDrive - Aalborg Universitet/01 - Research/01 - Research - Bibliometrics Transistions/analysis/output/viz/index.html#topic=0&lambda=#1&term=" frameborder="0"></iframe>')
-
-knitr::kable(tab, format = "html", escape = FALSE)
-
+# # TODO: Super unelegant up to now
+# tab <- tibble::tibble(" " = 
+#  '<link rel="stylesheet" type="text/css" href="https://raw.githack.com/daniel-hain/transitions_bibliometrics_2019/master/notebooks/viz/lda.css">
+#   <script src="https://raw.githack.com/daniel-hain/transitions_bibliometrics_2019/master/notebooks/viz/d3.v3.js"></script>
+#   <script src="https://raw.githack.com/daniel-hain/transitions_bibliometrics_2019/master/notebooks/viz/ldavis.js"></script>
+#   <iframe width="1000" height="750" src="https://raw.githack.com/daniel-hain/transitions_bibliometrics_2019/master/notebooks/viz/index.html" frameborder="0"></iframe>')
+# 
+# knitr::kable(tab, format = "html", escape = FALSE)
 ```
 
 
+<!-- ####################################################################################### -->
+<!-- ####################################################################################### -->
+<!-- ############################# NEXT PART ############################################### -->
+<!-- ####################################################################################### -->
+<!-- ####################################################################################### -->
 
-# Knowledge Bases: Co-Citation network analysis
 
+# Knowledge Bases: Co-Citation network analysis {.tabset}
 ```{r}
-names_kb <- c()
+names_kb <- tibble( 
+  com = 1:10,
+  com_kb_name = c(
+    "01: Classic Innovation Studies",
+    "02: Territorial Innovation Systems",
+    "03: Transition studies and transition management",
+    "04: Sociology & practice",
+    "05: Political geography &  ecology",
+    "06: Political sciences, public policy",
+    "07: Ecological economics",
+    "08: Natural/sustainability sciences",
+    "09: Organizational studies, management",
+    "10: Entrepreneurship")
+)
+
+C %<>% left_join(names_kb, by = "com")
 ```
 
+**Note:** This analysis refers the co-citation analysis, where the cited references and not the original publications are the unit of analysis. See tab `Technical description`for additional explanations
 
-## Technical description
+## Knowledge Bases summary
 
-**Note:** This analysis refers the co-citation analysis, where the cited references and not the original publications are the unit of analysis. Here, the strength of the relationship between a reference pair $m$ and $n$ ($s_{m,n}^{coc}$) is expressed by the number of publications $C$ which are jointly citing reference $m$ and $n$. 
-
-$$s_{m,n}^{coc} = \sum_i c_{i,m} c_{i,n}$$
-
-The intuition here is that references which are frequently cited together are likely to share commonalities in theory, topic, methodology, or context. It can be interpreted as a measure of similarity as evaluated by other researchers that decide to jointly cite both references. Because the publication process is time-consuming, co-citation is a backward-looking measure, which is appropriate to map the relationship between core literature of a field.
-
-## Identified knowledge Bases
-In order to partition networks into components or clusters, we deploy a **community detection** technique based on the **Lovain Algorithm** (Blondel et al., 2008). The Lovain Algorithm is a heuristic method that attempts to optimize the modularity of communities within a network by maximizing within- and minimizing between-community connectivity. 
-
-We identify the following communities = knowledge bases
+### Main Indicators
+In order to partition networks into components or clusters, we deploy a **community detection** technique based on the **Lovain Algorithm** (Blondel et al., 2008). The Lovain Algorithm is a heuristic method that attempts to optimize the modularity of communities within a network by maximizing within- and minimizing between-community connectivity. We identify the following communities = knowledge bases
 
 It is not the main focus of this exercise, but still informative to see which historical knowledge the fields draws from. 
 
 ```{r}
 C %>%
-  group_by(com) %>%
+  group_by(com_kb_name) %>%
   summarise(n = n(), density_int = ((sum(dgr_int) / (n() * (n() - 1))) * 100) %>% round(3)) %>%
-  #mutate(name = c("Evolutionary Economics?", "Sustainability transitions", "Territorial IS?", "Enviromental Science?")) %>%
-  select(com, everything())
+  select(com_kb_name, everything())
 ```
 
-We identify 9 communities of varyying size (note: I just gave it some ad-hoc names to work with for now. Should be revised). Lets take a look at their development over time.
+We identify 10 communities of varyying size. 
+
+### Development of Knowledge Bases
+
+```{r}
+cit_kb <- readRDS("temp/cit_el.RDS")
+
+cit_kb %<>% 
+  select(EID, CR_SID, CR_PY) %>%
+  rename(SID = CR_SID) %>%
+  left_join(M %>% select(EID, PY, com), by = "EID") %>%
+  rename(com_RA = com) %>%
+  left_join(C %>% select(SID, com), by = "SID") %>%
+  rename(com_KB = com) 
+
+cit_kb %<>% 
+  group_by(PY, com_KB) %>%
+  summarize(TC = n()) %>%
+  ungroup() %>% 
+  drop_na() %>%
+  group_by(PY) %>%
+  mutate(TC.rel = TC / sum(TC)) %>%
+  arrange(PY, com_KB) %>%
+  ungroup()
+
+cit_kb %<>% left_join(names_kb, by = c("com_KB" = "com") )
+```
+
 
 ```{r, fig.width = 15, fig.height=7.5}
-plot <- C %>% 
-  select(com, PY, TC) %>%
-  mutate(PY = as.numeric(PY)) %>%
-  group_by(com, PY) %>% summarise(n = n(), TC = sum(TC)) %>% ungroup() %>%
-  group_by(PY) %>% mutate(n.PY = sum(n), TC.PY = sum(TC)) %>% ungroup() %>%
-  mutate(n.rel = n / n.PY) %>%
-  mutate(TC.rel = TC / TC.PY) %>%
-  select(com, PY, n, n.rel, TC, TC.rel) %>%
-  filter(PY >= 1980 & PY <= 2015) %>%
-  arrange(PY, com)%>% 
-  plot_summary_timeline(y1 = n, y2 = n.rel, by = com, pal = "Paired",   
-                        y1_text = "Number citations recieved annually", 
-                        y2_text = "Share of citations recieved annually")
+cit_kb %>% 
+  plot_summary_timeline(y1 = TC, y2 = TC.rel, by = com_kb_name, pal = "Paired", label = TRUE,
+                        y1_text = "Number citations recieved annually",  y2_text = "Share of citations recieved annually",
+                        PY_max = 2016)
 ```
-
-
 
 Lets do a first attempt to categorize them. Notice the tabs for details.
 
 ## Detailed look at the knowledge bases {.tabset}
 
 ### Knowledge base 1
-
 ```{r}
+paste0("Knowledge Base: ", names_kb[1, "com_kb_name"])
+
 C %>% gen_summary(top_n = 10, level = "REF", what = "general", plot = TRUE, select_com = 1) 
 ```
 
-Seems to be pretty much industry & technology dynamics, evolutionary economics, organizational learning classics.
 
 ### Knowledge base 2
-
 ```{r}
+paste0("Knowledge Base: ", names_kb[2, "com_kb_name"])
+
 C %>% gen_summary(top_n = 10, level = "REF", what = "general", plot = TRUE, select_com = 2) 
 ```
 
-That one appears to be also a bit classic, but way more with a geographical focus, or generally pronouncing the role of space.
-
 ### Knowledge base 3
-
 ```{r}
+paste0("Knowledge Base: ", names_kb[3, "com_kb_name"])
+
 C %>% gen_summary(top_n = 10, level = "REF", what = "general", plot = TRUE, select_com = 3) 
 ```
 
 This appears to be the sustainable transitions internal knowledge base. Notice that it seems to be rather young, almost no central references pre-2000
 
 ### Knowledge base 4
-
 ```{r}
+paste0("Knowledge Base: ", names_kb[4, "com_kb_name"])
+
 C %>% gen_summary(top_n = 10, level = "REF", what = "general", plot = TRUE, select_com = 4) 
 ```
 
-Know to little about this literature, but seems to be more policy & governance.
-
 ### Knowledge base 5
-
 ```{r}
+paste0("Knowledge Base: ", names_kb[5, "com_kb_name"])
+
 C %>% gen_summary(top_n = 10, level = "REF", what = "general", plot = TRUE, select_com = 5) 
 ```
 
-More sociology, social practice, consumer behavior
-
 ### Knowledge base 6
-
 ```{r}
+paste0("Knowledge Base: ", names_kb[6, "com_kb_name"])
+
 C %>% gen_summary(top_n = 10, level = "REF", what = "general", plot = TRUE, select_com = 6) 
 ```
 
-Ecology and enviromental science
 
 ### Knowledge base 7
-
 ```{r}
+paste0("Knowledge Base: ", names_kb[7, "com_kb_name"])
+
 C %>% gen_summary(top_n = 10, level = "REF", what = "general", plot = TRUE, select_com = 7) 
 ```
 
-Also ecology, but with a more geographical focus.
 
 ### Knowledge base 8
-
 ```{r}
+paste0("Knowledge Base: ", names_kb[8, "com_kb_name"])
+
 C %>% gen_summary(top_n = 10, level = "REF", what = "general", plot = TRUE, select_com = 8) 
+```
+
+
+### Knowledge base 9
+```{r}
+paste0("Knowledge Base: ", names_kb[9, "com_kb_name"])
+
+C %>% gen_summary(top_n = 10, level = "REF", what = "general", plot = TRUE, select_com = 9) 
+```
+
+Institutional Sociology
+
+### Knowledge base 10
+```{r}
+paste0("Knowledge Base: ", names_kb[10, "com_kb_name"])
+
+C %>% gen_summary(top_n = 10, level = "REF", what = "general", plot = TRUE, select_com = 10) 
 ```
 
 Entrepreneurship
 
-### Knowledge base 9
-
-```{r}
-C %>% gen_summary(top_n = 10, level = "REF", what = "general", plot = TRUE, select_com = 6) 
-```
-
-Enviromental science, system modeling.
-
-
-# Research Areas: Bibliographic coupling analysis
 
 ## Technical description
-This is arguably the most interesting part. Here, we identify the literature's current knowledge frontier by carrying out a bibliographic coupling analysis of the publications in our corpus. This measure  uses bibliographical information of  publications to establish a similarity relationship between them. This **coupling-strength} between publications is determined by the number of commonly cited references they share, assuming a common pool of references to indicate similarity in context, methods, or theory. Formally, the strength of the relationship between a publication pair $i$ and $j$ ($s_{i,j}^{bib}$) is expressed by the number of commonly cited references. 
+In a co-cittion network, the strength of the relationship between a reference pair $m$ and $n$ ($s_{m,n}^{coc}$) is expressed by the number of publications $C$ which are jointly citing reference $m$ and $n$. 
 
-$$	s_{i,j}^{bib} = \sum_m c_{i,m} c_{j,m} $$
+$$s_{m,n}^{coc} = \sum_i c_{i,m} c_{i,n}$$
 
-
-Since our corpus contains publications which differ strongly in terms of the number of cited references, we normalize the coupling strength by the Jaccard similarity coefficient. Here, we weight the intercept of two publications' bibliography (shared refeences) by their union (number of all references cited by either $i$ or $j$). It is bounded between zero and one, where one indicates the two publications to have an identical bibliography, and zero that they do not share any cited reference. Thereby, we prevent publications from having high coupling strength due to a large bibliography (e.g., literature surveys).
-
-$$	S_{i,j}^{jac-bib} =\frac{C(i \cap j)}{C(i \cup j)} = \frac{s_{i,j}^{bib}}{c_i + c_j - s_{i,j}^{bib}} $$
+The intuition here is that references which are frequently cited together are likely to share commonalities in theory, topic, methodology, or context. It can be interpreted as a measure of similarity as evaluated by other researchers that decide to jointly cite both references. Because the publication process is time-consuming, co-citation is a backward-looking measure, which is appropriate to map the relationship between core literature of a field.
 
 
-More recent articles have a higher pool of possible references to co-cite to, hence they are more likely to be coupled. Consequently, bibliographic coupling represents a forward looking measure, and the method of choice to identify the current knowledge frontier at the point of analysis.
+<!-- ####################################################################################### -->
+<!-- ####################################################################################### -->
+<!-- ############################# NEXT PART ############################################### -->
+<!-- ####################################################################################### -->
+<!-- ####################################################################################### -->
 
 
-## Identified research areas
+# Research Areas: Bibliographic coupling analysis {.tabset}
+```{r}
+names_ra <- tibble( 
+  com = 1:7,
+  com_ra_name = c(
+    "01: Sustainability transition",
+    "02: Resilience & governance",
+    "03: Innovation & technological change",
+    "04: Economic geography",
+    "05: consumption & social practices",
+    "06: Climate change studies",
+    "07: Institutional theory & organizations"
+    )
+)
 
-To identify communities in the field's knowledge frontier (labeled **research areas**) we again use the **Lovain Algorithm** (Blondel et al., 2008). We identify the following communities = research areas
+M %<>% left_join(names_ra, by = "com")
+
+cols_ra <- names_ra %>% gg_color_select(com_ra_name) 
+```
+
+This is arguably the more interesting part. Here, we identify the literature's current knowledge frontier by carrying out a bibliographic coupling analysis of the publications in our corpus. This measure  uses bibliographical information of  publications to establish a similarity relationship between them. Again, method details to be found in the tab `Technical description`. As you will see, we identify the more narrow research community of Sustainability Transitions (in which we will zoom in later), but also a set of adjacent research areas with some theoretical/methodological/application overlap.
+
+## Research Areas main summary
+
+### Main Characteristics
+To identify communities in the field's knowledge frontier (labeled **research areas**) we again use the **Lovain Algorithm** (Blondel et al., 2008). We identify the following communities = research areas.
 
 ```{r}
+M %<>%
+  drop_na(com)
+
 M %>%
-  group_by(com) %>%
+  group_by(com_ra_name) %>%
   summarise(n = n(), density_int = ((sum(dgr_int) / (n() * (n() - 1))) * 100) %>% round(3)) %>%
-  select(com, everything())
+  select(com_ra_name, everything())
 
 ```
 
+Again, I made a very provisional attempt to name them. Has to be revised by someone that spends more time on that and knows it better. 
 
+### Development
 ```{r, fig.width = 15, fig.height=7.5}
 M %>%
   mutate(PY = PY %>% as.numeric()) %>%
-  group_by(com, PY) %>% summarise(n = n()) %>% ungroup() %>%
+  group_by(com_ra_name, PY) %>% summarise(n = n()) %>% ungroup() %>%
   group_by(PY) %>% mutate(n.PY = sum(n)) %>% ungroup() %>%
   mutate(n.rel = n / n.PY) %>%
-  select(com, PY, n, n.rel) %>%
+  select(com_ra_name, PY, n, n.rel) %>%
   filter(PY >= 1990 & PY <= 2017) %>% 
-  arrange(com, PY) %>% plot_summary_timeline(y1 = n, y2 = n.rel, by = com, label = TRUE,
-                               y1_text = "Number publications annually", 
-                               y2_text = "Share of publications annually")
+  arrange(com_ra_name, PY) %>% 
+  plot_summary_timeline(y1 = n, y2 = n.rel, by = com_ra_name, label = TRUE,
+                        y1_text = "Number publications annually", y2_text = "Share of publications annually",
+                        PY_max = 2016)
 ```
 
-## Research Areas in detail {.tabset}
+We again see quite some dynamics....
 
+### Connectivity between the research areas
+```{r}
+g.agg <- readRDS("temp/g_bib_agg.RDS")
+
+g.agg <- g.agg %N>%
+  arrange(com) %>%
+  mutate(name = names_ra %>% pull(com_ra_name),
+         color = cols_ra)
+```
+
+```{r, fig.height= 7.5, fig.width=7.5}
+g.agg %E>% 
+  filter(weight > 0 & from != to) %>%
+  filter(weight >= quantile(weight, 0.25) )  %>%
+  ggraph(layout = "circle") + 
+  geom_edge_arc(curvature = 0.075, aes(width = weight), alpha = 0.2)  + 
+  geom_node_point(aes(size = N), color = cols_ra)  + 
+  geom_node_text(aes(label = name), repel = TRUE) +
+  theme_graph(base_family = "Arial")
+```
+
+We see that...
+
+## Research Areas in detail {.tabset}
 ```{r}
 M1 <- M %>% 
   filter(TC >= 10 | TC_year >= 5) %>%
   filter(PY >= 1980 & PY <= 2019) %>%
   filter(NR >= 10 & NR <= 750) %>%
   filter( !(DT %in% c("Review", "Conference Paper")) )
-
 ```
 
-Lets again classify them one-by-one.
-
-**Brief reminder:** Centrality in a bibliographic coupling network == representativeness != importance. Therefore, the central articles should be appropriate to characterize the kind of work done in the community, but are not necessarily the most important or influencial ones.
+Lets again classify them one-by-one. **Brief reminder:** Centrality in a bibliographic coupling network == representativeness != importance. Therefore, the central articles should be appropriate to characterize the kind of work done in the community, but are not necessarily the most important or influencial ones.
 
 ### Research Area 1
 
 #### Most central authors, journals, institutions, most cited references
 ```{r}
+paste0("Research Area: ", names_ra[1, "com_ra_name"])
+
 M1 %>% gen_summary(top_n = 10, level = "PUB", what = "general", plot = TRUE, select_com = 1)
 ```
 
 #### Most central publications
-
 ```{r}
 M1 %>% gen_summary(top_n = 10, level = "PUB", what = "top", plot = TRUE, select_com = 1) 
 ```
 
 #### Summary
-
 TBD.
-
 
 ### Research Area 2
 
 #### Most central authors, journals, institutions, most cited references
 ```{r}
+paste0("Research Area: ", names_ra[2, "com_ra_name"])
+
 M1 %>% gen_summary(top_n = 10, level = "PUB", what = "general", plot = TRUE, select_com = 2)
 ```
 
 #### Most central publications
-
 ```{r}
 M1 %>% gen_summary(top_n = 10, level = "PUB", what = "top", plot = TRUE, select_com = 2) 
 ```
 
 #### Summary
-
 TBD.
-
 
 ### Research Area 3
 
 #### Most central authors, journals, institutions, most cited references
 ```{r}
+paste0("Research Area: ", names_ra[3, "com_ra_name"])
+
 M1 %>% gen_summary(top_n = 10, level = "PUB", what = "general", plot = TRUE, select_com = 3)
 ```
 
 #### Most central publications
-
 ```{r}
 M1 %>% gen_summary(top_n = 10, level = "PUB", what = "top", plot = TRUE, select_com = 3) 
 ```
 
 #### Summary
-
 TBD.
-
 
 ### Research Area 4
 
 #### Most central authors, journals, institutions, most cited references
 ```{r}
+paste0("Research Area: ", names_ra[4, "com_ra_name"])
+
 M1 %>% gen_summary(top_n = 10, level = "PUB", what = "general", plot = TRUE, select_com = 4)
 ```
 
 #### Most central publications
-
 ```{r}
 M1 %>% gen_summary(top_n = 10, level = "PUB", what = "top", plot = TRUE, select_com = 4) 
 ```
 
 #### Summary
-
 TBD.
-
 
 ### Research Area 5
 
 #### Most central authors, journals, institutions, most cited references
 ```{r}
+paste0("Research Area: ", names_ra[5, "com_ra_name"])
+
 M1 %>% gen_summary(top_n = 10, level = "PUB", what = "general", plot = TRUE, select_com = 5)
 ```
 
 #### Most central publications
-
 ```{r}
 M1 %>% gen_summary(top_n = 10, level = "PUB", what = "top", plot = TRUE, select_com = 5) 
 ```
 
 #### Summary
-
 TBD.
 
 ### Research Area 6
 
 #### Most central authors, journals, institutions, most cited references
 ```{r}
+paste0("Research Area: ", names_ra[6, "com_ra_name"])
+
 M1 %>% gen_summary(top_n = 10, level = "PUB", what = "general", plot = TRUE, select_com = 6)
 ```
 
 #### Most central publications
-
 ```{r}
 M1 %>% gen_summary(top_n = 10, level = "PUB", what = "top", plot = TRUE, select_com = 6) 
 ```
 
 #### Summary
-
 TBD.
-
 
 ### Research Area 7
 
 #### Most central authors, journals, institutions, most cited references
 ```{r}
+paste0("Research Area: ", names_ra[7, "com_ra_name"])
 M1 %>% gen_summary(top_n = 10, level = "PUB", what = "general", plot = TRUE, select_com = 7)
 ```
 
 #### Most central publications
-
 ```{r}
 M1 %>% gen_summary(top_n = 10, level = "PUB", what = "top", plot = TRUE, select_com = 7) 
 ```
 
 #### Summary
-
 TBD.
 
-## Connectivity between the research areas
-```{r}
-g.agg <- readRDS("temp/g_bib_agg.RDS")
-```
+## Technical description
+In a bibliographic coupling network, the **coupling-strength** between publications is determined by the number of commonly cited references they share, assuming a common pool of references to indicate similarity in context, methods, or theory. Formally, the strength of the relationship between a publication pair $i$ and $j$ ($s_{i,j}^{bib}$) is expressed by the number of commonly cited references. 
+
+$$	s_{i,j}^{bib} = \sum_m c_{i,m} c_{j,m} $$
+
+Since our corpus contains publications which differ strongly in terms of the number of cited references, we normalize the coupling strength by the Jaccard similarity coefficient. Here, we weight the intercept of two publications' bibliography (shared refeences) by their union (number of all references cited by either $i$ or $j$). It is bounded between zero and one, where one indicates the two publications to have an identical bibliography, and zero that they do not share any cited reference. Thereby, we prevent publications from having high coupling strength due to a large bibliography (e.g., literature surveys).
+
+$$	S_{i,j}^{jac-bib} =\frac{C(i \cap j)}{C(i \cup j)} = \frac{s_{i,j}^{bib}}{c_i + c_j - s_{i,j}^{bib}} $$
+
+More recent articles have a higher pool of possible references to co-cite to, hence they are more likely to be coupled. Consequently, bibliographic coupling represents a forward looking measure, and the method of choice to identify the current knowledge frontier at the point of analysis.
+
+
+<!-- ####################################################################################### -->
+<!-- ####################################################################################### -->
+<!-- ############################# NEXT PART ############################################### -->
+<!-- ####################################################################################### -->
+<!-- ####################################################################################### -->
+
+
+# Zooming in the systainability transitions community {.tabset}
 
 ```{r}
-g.agg %E>% 
-  filter(weight > 0 & from != to) %>%
-  filter(weight >= quantile(weight, 0.25) )  %>%
-  ggraph(layout = "circle") + 
-  geom_edge_arc(curvature = 0.075, aes(width = weight), alpha = 0.2)  + 
-  geom_node_point(aes(size = N, color = dgr)  )  + 
-  geom_node_text(aes(label = as.character(com)), repel = TRUE) +
-  theme_graph(base_family = "Arial")
-```
+names_ra_st <- tibble( 
+  com = 1:5,
+  com_ra2_name = c(
+    "01: MLP",
+    "02: SNM & TIS",
+    "03: ANT & Social construction",
+    "04: TM & Governance",
+    "05: Energy transition & community energy"
+    )
+)
+
+cols_ra_st <- names_ra_st %>% gg_color_select(com_ra2_name, pal = "Dark2") 
 
 
-
-
-# Zooming in the systainability transitions community
-
-```{r}
 M2 <- M %>%
-  filter(com == 2) %>%
+  filter(com == 1) %>%
   select(-com, -dgr_int) %>%
   rename(com = com2,
          dgr_int = dgr_int2)
 
+M2 %<>% left_join(names_ra_st, by = "com")
+
 g <- readRDS("temp/g_bib.RDS")
 
 gx <- g %N>%
-  filter(com == 2) %>%
+  filter(com == 1) %>%
   filter(TC >= 5 & NR >= 5) %>%
   mutate(SR = SR %>% str_remove("'"),
          dgr_ext = dgr - dgr_int)
@@ -622,32 +720,124 @@ rm(gx, x, i)
 #     theme_graph(base_family = "Arial")
 ```
 
-In the first scan it can clearly be seen, that the core of the sustainability transitions community resides in **com2**. So, lets zoom in a bit there and look at its internal structure.  So, I did a second round of community detection inside **com2** to identify the sub-communities within sustainability transitions. Lets see what we find. 
+In the first scan it can clearly be seen, that the core of the sustainability transitions community resides in **com1**. So, lets zoom in a bit there and look at its internal structure.  So, I did a second round of community detection inside **com1** to identify the sub-communities within sustainability transitions. Lets see what we find. 
 
+## ST Research Areas Main Summary
+
+### Main Characteristics
 ```{r}
 M2 %>%
-  group_by(com) %>%
+  group_by(com_ra2_name) %>%
   summarise(n = n(), density_int = ((sum(dgr_int) / (n() * (n() - 1))) * 100) %>% round(3)) %>%
-  select(com, everything())
-
+  select(com_ra2_name, everything())
 ```
 
 In this case, we find 6 ST internal communities.
 
+### Development
 ```{r, fig.width = 15, fig.height=7.5}
 M2 %>%
   mutate(PY = PY %>% as.numeric()) %>%
-  group_by(com, PY) %>% summarise(n = n()) %>% ungroup() %>%
+  group_by(com_ra2_name, PY) %>% summarise(n = n()) %>% ungroup() %>%
   group_by(PY) %>% mutate(n.PY = sum(n)) %>% ungroup() %>%
   mutate(n.rel = n / n.PY) %>%
-  select(com, PY, n, n.rel) %>%
+  select(com_ra2_name, PY, n, n.rel) %>%
   filter(PY >= 1990 & PY <= 2017) %>% 
-  arrange(com, PY) %>% plot_summary_timeline(y1 = n, y2 = n.rel, by = com, label = TRUE,
-                               y1_text = "Number publications annually", 
-                               y2_text = "Share of publications annually")
+  arrange(com_ra2_name, PY) %>% 
+  plot_summary_timeline(y1 = n, y2 = n.rel, by = com_ra2_name, label = TRUE, pal = "Dark2",
+                        y1_text = "Number publications annually", y2_text = "Share of publications annually",
+                        PY_max = 2016)
 ```
 
-Lets look at them again one-by-one
+### Topics
+```{r, fig.width = 15, fig.height=7.5}
+el_topic %>%
+  filter(com == 1) %>%
+  select(PY, topic, weight) %>%
+  mutate(PY = as.numeric(PY)) %>%
+  group_by(PY, topic) %>% summarise(weight = mean(weight)) %>% ungroup() %>%
+  group_by(PY) %>% mutate(weight.PY = sum(weight)) %>% ungroup() %>%
+  mutate(weight.rel = weight / weight.PY) %>%
+  select(PY, topic, weight, weight.rel) %>%
+  filter(PY >= 1990 & PY <= 2017) %>%
+  arrange(PY, topic) %>%
+  plot_summary_timeline(y1 = weight, y2 = weight.rel, by = topic, pal = "Paired", label = TRUE, 
+                        y1_text = "Topic popularity annualy", y2_text = "Share of topic annually")
+```
+
+### Knowledge Bases
+
+```{r}
+cit_kb_st <- readRDS("temp/cit_el.RDS")
+
+cit_kb_st %<>% 
+  select(EID, CR_SID, CR_PY) %>%
+  rename(SID = CR_SID) %>%
+  left_join(M %>% select(EID, PY, com, com2), by = "EID") %>%
+  rename(com_RA = com) %>%
+  left_join(C %>% select(SID, com), by = "SID") %>%
+  rename(com_KB = com) 
+
+cit_kb_st %<>% 
+  filter(com_RA == 1) %>%
+  group_by(PY, com_KB) %>%
+  summarize(TC = n()) %>%
+  ungroup() %>% 
+  drop_na() %>%
+  group_by(PY) %>%
+  mutate(TC.rel = TC / sum(TC)) %>%
+  arrange(PY, com_KB) %>%
+  ungroup()
+
+cit_kb_st %<>% left_join(names_kb, by = c("com_KB" = "com") )
+
+```
+
+```{r, fig.width = 15, fig.height=7.5}
+cit_kb_st %>% 
+  plot_summary_timeline(y1 = TC, y2 = TC.rel, by = com_kb_name, pal = "Paired", label = TRUE,
+                        y1_text = "Number citations recieved annually",  y2_text = "Share of citations recieved annually",
+                        PY_max = 2016)
+```
+
+
+
+### Connectivity between the research areas
+```{r}
+require(RNewsflow)
+g.agg2 <- g %N>%
+  filter(com == 1)
+  
+g.agg2 <- g.agg2 %N>%  
+  network.aggregate(by = "com2", edge.attribute = "weight", agg.FUN = sum)  %>%
+  as.undirected(mode = "collapse", edge.attr.comb = "sum") %>%
+  as_tbl_graph(directed = FALSE) %N>%
+  select(-name) %>%
+  mutate(id = 1:n()) %E>%
+  rename(weight = agg.weight) %>%
+  select(from, to, weight)
+
+g.agg2 <- g.agg2 %E>%
+  rename(weight_count = weight) %>%
+  mutate(weight = weight_count / (.N()$N[from] * .N()$N[to]) ) %>%
+  mutate(weight = (weight * 100) %>% round(4)) %N>%
+  mutate(dgr = centrality_degree(weights = weight))
+
+
+g.agg2 %N>%
+  arrange(com2) %>%
+  mutate(name = names_ra_st %>% pull(com_ra2_name),
+         color = cols_ra_st) %E>% 
+  filter(weight > 0 & from != to) %>%
+  filter(weight >= quantile(weight, 0.25) ) %>%
+  ggraph(layout = "circle") + 
+  geom_edge_arc(curvature = 0.075, aes(width = weight), alpha = 0.2)  + 
+  geom_node_point(aes(size = N), color = cols_ra_st)  + 
+  geom_node_text(aes(label = name), repel = TRUE) +
+  theme_graph(base_family = "Arial")
+```
+
+
 
 ## ST internal Research Areas in detail {.tabset}
 
@@ -655,24 +845,23 @@ Lets look at them again one-by-one
 
 #### Most central authors, journals, institutions, most cited references
 ```{r}
+paste0("ST internal Research Area: ", names_ra_st[1, "com_ra2_name"])
+
 M2 %>% gen_summary(top_n = 10, level = "PUB", what = "general", plot = TRUE, select_com = 1)
 ```
 
 #### Most central publications
-
 ```{r}
 M2 %>% gen_summary(top_n = 10, level = "PUB", what = "top", plot = TRUE, select_com = 1) 
 ```
 
 #### Internal network structure
-
 ```{r}
 girafe(ggobj = gxi[[1]], width_svg = 8, height_svg = 6) %>% 
     girafe_options(opts_zoom(max = 4), opts_tooltip(opacity = 0.7) )
 ```
 
 #### Summary
-
 TBD.
 
 
@@ -680,118 +869,91 @@ TBD.
 
 #### Most central authors, journals, institutions, most cited references
 ```{r}
+paste0("ST internal Research Area: ", names_ra_st[2, "com_ra2_name"])
+
 M2 %>% gen_summary(top_n = 10, level = "PUB", what = "general", plot = TRUE, select_com = 2)
 ```
 
 #### Most central publications
-
 ```{r}
 M2 %>% gen_summary(top_n = 10, level = "PUB", what = "top", plot = TRUE, select_com = 2) 
 ```
 
 #### Internal network structure
-
 ```{r}
 girafe(ggobj = gxi[[2]], width_svg = 8, height_svg = 6) %>% 
     girafe_options(opts_zoom(max = 4), opts_tooltip(opacity = 0.7) )
 ```
 
 #### Summary
-
 TBD.
 
 ### Research Area 3
 
 #### Most central authors, journals, institutions, most cited references
 ```{r}
+paste0("ST internal Research Area: ", names_ra_st[3, "com_ra2_name"])
+
 M2 %>% gen_summary(top_n = 10, level = "PUB", what = "general", plot = TRUE, select_com = 3)
 ```
 
 #### Most central publications
-
 ```{r}
 M2 %>% gen_summary(top_n = 10, level = "PUB", what = "top", plot = TRUE, select_com = 3) 
 ```
 
 #### Internal network structure
-
 ```{r}
 girafe(ggobj = gxi[[3]], width_svg = 8, height_svg = 6) %>% 
     girafe_options(opts_zoom(max = 4), opts_tooltip(opacity = 0.7) )
 ```
 
 #### Summary
-
 TBD.
 
 ### Research Area 4
 
 #### Most central authors, journals, institutions, most cited references
 ```{r}
+paste0("ST internal Research Area: ", names_ra_st[4, "com_ra2_name"])
+
 M2 %>% gen_summary(top_n = 10, level = "PUB", what = "general", plot = TRUE, select_com = 4)
 ```
 
 #### Most central publications
-
 ```{r}
 M2 %>% gen_summary(top_n = 10, level = "PUB", what = "top", plot = TRUE, select_com = 4) 
 ```
 
 #### Internal network structure
-
 ```{r}
 girafe(ggobj = gxi[[4]], width_svg = 8, height_svg = 6) %>% 
     girafe_options(opts_zoom(max = 4), opts_tooltip(opacity = 0.7) )
 ```
 
 #### Summary
-
 TBD.
 
 ### Research Area 5
 
 #### Most central authors, journals, institutions, most cited references
 ```{r}
+paste0("ST internal Research Area: ", names_ra_st[5, "com_ra2_name"])
+
 M2 %>% gen_summary(top_n = 10, level = "PUB", what = "general", plot = TRUE, select_com = 5)
 ```
 
 #### Most central publications
-
 ```{r}
 M2 %>% gen_summary(top_n = 10, level = "PUB", what = "top", plot = TRUE, select_com = 5) 
 ```
 
 #### Internal network structure
-
 ```{r}
 girafe(ggobj = gxi[[5]], width_svg = 8, height_svg = 6) %>% 
     girafe_options(opts_zoom(max = 4), opts_tooltip(opacity = 0.7) )
 ```
 
 #### Summary
-
 TBD.
 
-### Research Area 6
-
-#### Most central authors, journals, institutions, most cited references
-```{r}
-M2 %>% gen_summary(top_n = 10, level = "PUB", what = "general", plot = TRUE, select_com = 6)
-```
-
-#### Most central publications
-
-```{r}
-M2 %>% gen_summary(top_n = 10, level = "PUB", what = "top", plot = TRUE, select_com = 6) 
-```
-
-#### Internal network structure
-
-```{r}
-girafe(ggobj = gxi[[6]], width_svg = 8, height_svg = 6) %>% 
-    girafe_options(opts_zoom(max = 4), opts_tooltip(opacity = 0.7) )
-```
-
-#### Summary
-
-TBD.

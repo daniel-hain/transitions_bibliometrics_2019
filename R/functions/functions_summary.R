@@ -196,7 +196,7 @@ gen_summary_ref <- function(x, top_n = top_n, what = what, plot = plot){
   
   ### For top-references network based
   if(what == "top"){
-    cat("Sorry, noy available for titation review.")
+    cat("Sorry, noy available for citation review.")
     break
   }
   
