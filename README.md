@@ -1,6 +1,7 @@
 # Bibliometric analysis of sustainability transition studies
 Workflow and preliminary findings findings for our 2019 bibliometric analysis of the field of "sustainability transitions"
 
+Check out the work-in-progress package [`TidyScientometrix`](https://github.com/daniel-hain/TidyScientometrix) to reconstruct the analysis.
 
 
 ## Preliminary Results
