@@ -62,7 +62,7 @@ library(dbplyr)
 ### Load all abstracts available
 index <- list.files(path = "input", pattern = "\\.txt", all.files = FALSE, full.names = TRUE)
 
-M <- read_scopus_collection(index, fields = c("EID", "TI", "DE", "ID", "AB") )
+M <- read_scopus_collection(index, fields = c("EID", "PY", "TI", "DE", "ID", "AB") )
 
 M %<>%
   mutate(DE = DE %>% map_chr(paste, collapse = "; "),
@@ -79,6 +79,7 @@ db <- dbConnect(RSQLite::SQLite(), "output/bliographics.sqlite")
 
 dbExecute(db,"CREATE TABLE IF NOT EXISTS transitions_2019_AB (
                   EID char(30) PRIMARY KEY,
+                  PY int,
                   TI text,
                   DE text,
                   ID text,

@@ -7,22 +7,31 @@
 ############################################################################
 # Preamble
 ############################################################################
-source("C:/Users/Admin/R_functions/preamble.R")
+### Generic preamble
+rm(list=ls())
+
+Sys.setenv(LANG = "en") # For english language
+options(scipen = 5) # To deactivate annoying scientific number notation
+set.seed(1337) # To have a seed defined for reproducability
+
+library(tidyverse)
+library(magrittr)
 
 ############################################################################
 # Select Seed articels
 ############################################################################
-rm(list=ls()); graphics.off()
+
+# own functions
 source("functions/functions_scopus.R")
 
-file_list <- fread("input/000_seed_index.csv")
+file_list <- read_csv("../input/000_seed_index.csv")
 index <- file_list %>% na_if("") %>% drop_na(index) %>% distinct(index)  %>% pull() 
-index <- paste0("input/", index, ".txt")
+index <- paste0("../input/", index, ".txt")
 
 M <- read_scopus_collection(index, TC_min = 1, TC_year_min = 0.25, PY_max = 2019, PY_min = 1998, n_max = 1000, 
                             type = "reduced", exclude = c(DT = "Conference Paper")) %>% arrange(desc(TC), PY)
 
-saveRDS(M, "temp/M_1.RDS")
+saveRDS(M, "../temp/M_1.RDS")
 
 
 #####################################################################################################
@@ -37,8 +46,8 @@ library(rlist)
 scopus_key <- "79bfa1706e6434d1e36992889ebeb3d5" # or: 	"60c71dc8201d9e13dfac7872fb340130"
 
 ### Abstract update
-M <- readRDS("temp/M_1.RDS")
-M.scopus_full <- readRDS("output/M_scopus_full_raw.RDS")
+M <- readRDS("../temp/M_1.RDS")
+M.scopus_full <- readRDS("../output/M_scopus_full_raw.RDS")
 
 EID_select <- M %>% select(EID)
 EID_exist <- M.scopus_full %>% list.select(x = coredata$eid) %>% map(unname) %>% unlist() 

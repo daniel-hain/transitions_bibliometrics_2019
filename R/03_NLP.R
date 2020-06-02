@@ -31,7 +31,6 @@ require(topicmodels)
 require(stopwords)
 
 ## Some preprocessing
-# TODO: MAke a proper stem-completion instead
 data %<>% 
   mutate(TXT = paste(TI, DE, AB, sep = " ")) %>% 
   mutate(TXT = TXT %>% 
@@ -48,18 +47,24 @@ data %<>%
 # Generate and manipulate copus
 ###########################################################################
 
+## Lemmatizing & stopwords
+# Loading dictionary
 lemma_dict <- readRDS("temp/lemma_dictionary.RDS") %>% 
   mutate_all(as.character) %>%
   mutate(stem = stem %>% iconv(to = "UTF-8", sub = "byte"))
 lemma_dict <- lemma_dict[-1,]
-  
+
+# Defining own lemmas  
 lemma_own <- tibble(
   stem = c("institution",   "technology",    "nation",   "region",   "sustainability", "environment",   "policy"),
   term = c("institutional", "technological", "national", "regional", "sustainable",    "environmental", "political") )
 lemma_dict %<>% bind_rows(lemma_own) %>% distinct()
 rm(lemma_own)
 
+# Loading stopword dictionary
 stopwords_dict <- c(stop_words %>% pull(word), stopwords("en","snowball"), stopwords("en","stopwords-iso")) %>% unique()
+
+# Creating own list of stopwords
 stopwords_own <- c("study", "paper", "result", "model", "approach", "article", "author", "method", "understand", "focus", "examine", "aim", "argue", "identify",
                    "increase", "datum", "potential", "explore", "include", "issue", "propose", "address", "apply", "require", "analyse", "relate", "finding",
                    "analyze", "discuss", "contribute", "publish", "involve", "draw", "lead", "exist", "set", "reduce", "create", "form", "explain", "play",
@@ -68,7 +73,7 @@ stopwords_own <- c("study", "paper", "result", "model", "approach", "article", "
 stopwords_dict <- c(stopwords_dict, stopwords_own) %>% unique()
 rm(stopwords_own)
 
-# Generate corpus
+## Generate corpus
 st_corpus <- data %>% corpus(docid_field = "EID", text_field = "TXT")
 rm(data)
 
@@ -80,7 +85,7 @@ toks <- tokens(st_corpus, what = "word") %>%
   tokens_remove(stopwords_dict) %>%
   tokens_ngrams(n = 1:3) # %>% tokens_wordstem(language = "en") 
 
-### Generate and adjust DTM
+## Generate and adjust DTM
 st_dfm <- dfm(toks) %>% 
   dfm_select(min_nchar = 3) %>%
   dfm_trim(min_termfreq = 0.90, termfreq_type = "quantile") 
