@@ -27,6 +27,11 @@ library(kableExtra) # For table styling
 library(tidygraph)
 library(ggraph)
 
+# own functions
+source("../functions/functions_basic.R")
+source("../functions/functions_summary.R")
+source("../functions/00_parameters.R")
+
 ```
 
 ```{r global_options, include=FALSE}
@@ -120,5 +125,5 @@ NEEDS UPDATE
 Note: The following tables refer to the documents in the main corpus. Generally, `dgr` refers to the degree, `n` to the number of publications. Subscript `.f` indicates the number is fractionalized (divided by the number of elements per publication)
 
 ```{r}
-M %>% gen_summary(top_n = 20, level = "PUB", what = "count", plot = TRUE) 
+#M %>% gen_summary(top_n = 20, level = "PUB", what = "count", plot = TRUE) 
 ```

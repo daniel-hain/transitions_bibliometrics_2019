@@ -3,29 +3,6 @@ title: "to addd"
 output: html_document
 ---
 
-
-
-
-
-
-
-### List of all seed papers
-```{r}
-seed %>% 
-  select(-SR, -index) %>%
-  select(n, everything()) %>%
-  kable(row.names = FALSE) %>% 
-  kable_styling(bootstrap_options = c("striped", "hover", "condensed"), full_width = TRUE, font_size = 10) 
-```
-
-
-## Publications
-Note: The following tables refer to the documents in the main corpus. Generally, `dgr` refers to the degree, `n` to the number of publications. Subscript `.f` indicates the number is fractionalized (divided by the number of elements per publication)
-
-```{r}
-M %>% gen_summary(top_n = 20, level = "PUB", what = "count", plot = TRUE) 
-```
-
 ## References cited
 ```{r}
 C <- readRDS("temp/C_nw.RDS")
