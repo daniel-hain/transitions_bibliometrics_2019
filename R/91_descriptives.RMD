@@ -1,5 +1,5 @@
 ---
-title: "Transitions Bibliometrics 2019"
+title: "Transitions Bibliometrics 2020"
 author: "Daniel S. Hain"
 date: "`r format(Sys.time(), '%d %B, %Y')`"
 output:
@@ -9,7 +9,6 @@ output:
     toc_depth: 3
     toc_float: yes
     number_sections: yes
-
 ---
 
 ```{r setup, include=FALSE}
@@ -20,10 +19,13 @@ set.seed(1337)
 
 ### Load packages  
 library(knitr) # For display of the markdown
+library(kableExtra) # For table styling
+
 library(tidyverse)
 library(magrittr)
 
-library(kableExtra) # For table styling
+
+library(bibliometrix)
 library(tidygraph)
 library(ggraph)
 
@@ -47,7 +49,7 @@ knitr::opts_chunk$set(echo = FALSE,
 <!-- ####################################################################################### -->
 <!-- ####################################################################################### -->
 
-# Initial Corpus generation & inspection 
+# Initial Corpus generation 
 
 ```{r}
 M <- readRDS("../../temp/M.RDS") %>% as_tibble()
@@ -68,7 +70,7 @@ That leads to an overall corpus size of:
 cat("Number of unique publications in the final corpus: ", nrow(M))
 ```
 
-## Seed Paper {.tabset}
+## Seed Paper
 ```{r}
 # NOTE: NOT WORKING TILL WE GET THE SEED PAPER LIST
 
@@ -88,7 +90,19 @@ cat("Number of unique publications in the final corpus: ", nrow(M))
 # seed[1, "SR"] <- seed[1, "TI"]
 ```
 
-In the following, we more in detail investigate the seed papers. Notice the adittional `tabs` for details on ou selection of seed papers.
+In the following, we more in detail investigate the seed papers. 
+
+### List of all seed papers
+
+NEEDS UPDATE
+
+```{r}
+# seed %>% 
+#   select(-SR, -index) %>%
+#   select(n, everything()) %>%
+#   kable(row.names = FALSE) %>% 
+#   kable_styling(bootstrap_options = c("striped", "hover", "condensed"), full_width = TRUE, font_size = 10) 
+```
 
 ### Seep papers and corpus size
 
@@ -109,21 +123,126 @@ plot %>% plotly::ggplotly(tooltip = c("x", "y") )
 
 First insight: It appears the main Sustainability corpus seems saturated, expansion appears more in adjacent fields.
 
-### List of all seed papers
+<!-- ####################################################################################### -->
+<!-- ####################################################################################### -->
+<!-- ############################# NEXT PART ############################################### -->
+<!-- ####################################################################################### -->
+<!-- ####################################################################################### -->
 
-NEEDS UPDATE
+# General Overview over the ST and surrounding fields
+
+## Main Indicators: Publications, Authors, Countries
+
+To start with, a general overview over the documents in the corpus
 
 ```{r}
-# seed %>% 
-#   select(-SR, -index) %>%
-#   select(n, everything()) %>%
-#   kable(row.names = FALSE) %>% 
-#   kable_styling(bootstrap_options = c("striped", "hover", "condensed"), full_width = TRUE, font_size = 10) 
+results<- readRDS("../../temp/results.RDS") 
+
+results %>% summary(k = 10, pause = FALSE)
 ```
 
-## Publications
-Note: The following tables refer to the documents in the main corpus. Generally, `dgr` refers to the degree, `n` to the number of publications. Subscript `.f` indicates the number is fractionalized (divided by the number of elements per publication)
+```{r}
+results %>% plot(k = 10, pause = FALSE)
+```
+
+```{r}
+rm(results)
+```
+
+## Cited references
+
+```{r}
+CR <- readRDS("../../temp/CR.RDS") 
+```
+
+Top 20 cited references:
+
+```{r}
+CR$Cited %>% as_tibble() %>% head(20)
+```
+
+
+
 
 ```{r}
 #M %>% gen_summary(top_n = 20, level = "PUB", what = "count", plot = TRUE) 
+```
+
+
+```{r}
+rm(CR)
+```
+
+
+<!-- ####################################################################################### -->
+<!-- ####################################################################################### -->
+<!-- ############################# NEXT PART ############################################### -->
+<!-- ####################################################################################### -->
+<!-- ####################################################################################### -->
+
+# Topic modelling
+```{r}
+library(tidytext)
+
+text_tidy <- readRDS("../../temp/text_tidy.RDS")
+text_lda <- readRDS("../../temp/text_lda.RDS")
+```
+
+I by now created some topic modelling. The results are now more fine-tuned, but there is still room for some improvement. We ran a LDA on the titles + abstracts of our corpus, aiming at identifying 10 topics (some different numbers of topics to generate shows that 10 result in good results, more topics lead to too much overlap between them)
+
+## Topics by topwords
+```{r} 
+# , fig.width=20, fig.height=17.5
+mycol_lda <- text_lda %>% tidy(matrix = "beta") %>% gg_color_select(cat = topic, pal = "Paired")
+
+text_lda %>% tidy(matrix = "beta") %>%
+  group_by(topic) %>%
+  slice_max(beta, n = 10) %>%
+  ungroup() %>%
+  mutate(term = reorder_within(term, beta, topic)) %>%
+  ggplot(aes(term, beta, fill = factor(topic))) +
+  geom_col(show.legend = FALSE) +
+  facet_wrap(~ topic, scales = "free") +
+  coord_flip() +
+  scale_x_reordered() +
+  labs(x = "Intra-topic distribution of word",
+       y = "Words in topic") + 
+  scale_fill_manual(name = "Legend", values = mycol_lda) 
+```
+
+This might still be finetuned, but initially doesnt look that bad I think. All the topics for me seem to be somewhat identifiable. We should maybe start naming them to make their interpretation later easier. 
+
+## Topics over time
+```{r, fig.width = 15, fig.height=7.5}
+
+text_lda %>% tidy(matrix = "gamma") %>%
+  rename(weight = gamma) %>%
+  left_join(M %>% select(XX, PY), by = c('document' = 'XX')) %>%
+  mutate(PY = as.numeric(PY)) %>%
+  group_by(PY, topic) %>% summarise(weight = sum(weight)) %>% ungroup() %>%
+  group_by(PY) %>% mutate(weight_PY = sum(weight)) %>% ungroup() %>%
+  mutate(weight_rel = weight / weight_PY) %>%
+  select(PY, topic, weight, weight_rel) %>%
+  filter(PY >= 1998 & PY <= 2019) %>%
+  arrange(PY, topic) %>%
+  plot_summary_timeline(y1 = weight, y2 = weight_rel, t = PY, by = topic,  pal = "Paired", label = FALSE, 
+                        y1_text = "Topic popularity annualy", y2_text = "Share of topic annually")
+```
+
+Here, we see quite  a shift in the discourse over time. 
+
+## LDAViz
+Here you find a nice way of exploring topics via the `LDAVIz` methodology of visulizing the result of an LDA. It dispolays all topics in a 2 dimensional TSNE (similar to PCA, but optimized for graphical illustration in 2d), and also gives a nice visual representation over the topics top-word distribution and overall frequencies of this words in the corpus. The $\lambda$ parameter regulates the importance-ordering of the topwords. High $\lambda$ order words by the highest propability to appear in the topic to the lowest (independent of the overall word popularity in the corpus), whle low $\lambda$ emphasize words which are very specific to the topic, and rarely appear in others.
+
+Play a bit around. Since it would be here a bit condensed, better check it out  [HERE](https://daniel-hain.github.io/transitions_bibliometrics_2019/output/LDAviz/) in fullscreen for a better overview.
+
+```{r}
+# # TODO: Super unelegant up to now
+# tab <- tibble::tibble(" " = 
+#  '<link rel="stylesheet" type="text/css" href="https://raw.githack.com/daniel-hain/transitions_bibliometrics_2019/master/notebooks/viz/lda.css">
+#   <script src="https://raw.githack.com/daniel-hain/transitions_bibliometrics_2019/master/notebooks/viz/d3.v3.js"></script>
+#   <script src="https://raw.githack.com/daniel-hain/transitions_bibliometrics_2019/master/notebooks/viz/ldavis.js"></script>
+#   <iframe width="1000" height="750" src="https://raw.githack.com/daniel-hain/transitions_bibliometrics_2019/master/notebooks/viz/index.html" frameborder="0"></iframe>')
+# 
+# knitr::kable(tab, format = "html", escape = FALSE)
 ```

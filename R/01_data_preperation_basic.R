@@ -215,10 +215,7 @@ g_cit_agg <- g_cit %>%
 saveRDS(g_cit_agg, "../temp/g_cit_agg.RDS")
 rm(mat_cit, g_cit, g_cit_agg)
 
-#### 2 mode network # TODO
-# CRL <- M %>% localCitations(sep = ";") # For some reason takes forever...
-# CR <- M %>% citations(field = "article", sep = ";")
-
+#### 2 mode network 
 m_2m <- M %>% cocMatrix(Field = "CR", sep = ";")
 
 g_2m <- m_2m %>% igraph::graph_from_incidence_matrix(directed = TRUE, weighted = FALSE) %>% 
@@ -247,6 +244,18 @@ results <- M %>% biblioAnalysis(sep = ";")
 # Save 
 results %>% saveRDS("../temp/results.RDS")
 rm(results)
+
+############################################################################
+# Locan citations
+############################################################################
+CR <- M %>% citations(field = "article", sep = ";")
+CR %>% saveRDS("../temp/CR.RDS")
+rm(CR)
+
+CRL <- M %>% localCitations(sep = ";") # For some reason takes forever...
+CRL %>% saveRDS("../temp/CRL.RDS")
+rm(CRL)
+
 ############################################################################
 # Historical citation
 ############################################################################
@@ -323,7 +332,7 @@ text_tidy %<>%
   mutate(term = term %>% lemmatize_words(dictionary = lexicon::hash_lemmas %>% filter(token != 'data') %>%
                                            anti_join(lemma_own, by = 'token') %>%
                                            bind_rows(lemma_own) ))
-text_tidy %>% saveRDS("../temp/text_tidy.R")
+text_tidy %>% saveRDS("../temp/text_tidy.RDS")
 rm(lemma_own)
 
 # TTM
@@ -333,7 +342,7 @@ text_dtm <- text_tidy %>%
 
 # LDA
 text_lda <- text_dtm %>% LDA(k = 6, control = list(seed = 1337))
-text_lda %>% saveRDS("../temp/text_lda.R")
+text_lda %>% saveRDS("../temp/text_lda.RDS")
 
 rm(text_tidy, text_dtm, text_lda)
 
