@@ -162,8 +162,6 @@ CR$Cited %>% as_tibble() %>% head(20)
 ```
 
 
-
-
 ```{r}
 #M %>% gen_summary(top_n = 20, level = "PUB", what = "count", plot = TRUE) 
 ```
@@ -171,6 +169,16 @@ CR$Cited %>% as_tibble() %>% head(20)
 
 ```{r}
 rm(CR)
+```
+
+### Authors, Themes & Journals
+
+```{r}
+M_threefield <- readRDS("../../temp/M_threefield.RDS") 
+M_threefield
+```
+```{r}
+rm('M_threefield')
 ```
 
 
@@ -208,6 +216,9 @@ text_lda %>% tidy(matrix = "beta") %>%
   labs(x = "Intra-topic distribution of word",
        y = "Words in topic") + 
   scale_fill_manual(name = "Legend", values = mycol_lda) 
+
+#plot_ly <- plot %>% plotly::ggplotly()
+#htmlwidgets::saveWidget(plotly::as_widget(plot_ly), '../output\vis_plotly_topic_terms.html', selfcontained = TRUE)
 ```
 
 This might still be finetuned, but initially doesnt look that bad I think. All the topics for me seem to be somewhat identifiable. We should maybe start naming them to make their interpretation later easier. 
@@ -236,13 +247,3 @@ Here you find a nice way of exploring topics via the `LDAVIz` methodology of vis
 
 Play a bit around. Since it would be here a bit condensed, better check it out  [HERE](https://daniel-hain.github.io/transitions_bibliometrics_2019/output/LDAviz/) in fullscreen for a better overview.
 
-```{r}
-# # TODO: Super unelegant up to now
-# tab <- tibble::tibble(" " = 
-#  '<link rel="stylesheet" type="text/css" href="https://raw.githack.com/daniel-hain/transitions_bibliometrics_2019/master/notebooks/viz/lda.css">
-#   <script src="https://raw.githack.com/daniel-hain/transitions_bibliometrics_2019/master/notebooks/viz/d3.v3.js"></script>
-#   <script src="https://raw.githack.com/daniel-hain/transitions_bibliometrics_2019/master/notebooks/viz/ldavis.js"></script>
-#   <iframe width="1000" height="750" src="https://raw.githack.com/daniel-hain/transitions_bibliometrics_2019/master/notebooks/viz/index.html" frameborder="0"></iframe>')
-# 
-# knitr::kable(tab, format = "html", escape = FALSE)
-```

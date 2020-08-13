@@ -46,7 +46,7 @@ M %<>% metaTagExtraction(Field = "AU_CO", aff.disamb = TRUE, sep = ";")
 
 # Save 
 M %>% saveRDS("../temp/M.RDS")
-rm(file_list, vars, read_collection)
+rm(file_list, read_collection)
 
 ############################################################################
 # Networks Bibliographic
@@ -111,8 +111,6 @@ M_bib <- M %>% select(XX) %>% inner_join(g_bib %N>% as_tibble() %>% select(name,
 # Save and remove
 M_bib %>% saveRDS("../temp/M_bib.RDS")
 
-rm(mat_bib, g_bib, com_size_bib, cutof_edge_bib, cutof_node_bib)
-
 ### Aggregated Network
 require(RNewsflow)
 g_bib_agg <- g_bib %>%
@@ -124,14 +122,16 @@ g_bib_agg <- g_bib %>%
   rename(weight = agg.weight) %>%
   select(from, to, weight)
 
+
+
 # g_bib_agg <- g_bib_agg %E>%
 #   rename(weight_count = weight) %>%
 #   mutate(weight = weight_count / (.N()$N[from] * .N()$N[to]) ) %>%
 #   mutate(weight = (weight * 100) %>% round(4)) %N>%
 #   mutate(dgr = centrality_degree(weights = weight))
 
-saveRDS(g_bib_agg, "temp/g_bib_agg.RDS")
-rm(g_bib, g_bib_agg)
+g_bib_agg %>% saveRDS("../temp/g_bib_agg.RDS")
+rm(mat_bib, g_bib, com_size_bib, cutof_edge_bib, cutof_node_bib, g_bib_agg)
 
 ### Restrict original M
 M %<>%
@@ -218,7 +218,7 @@ rm(mat_cit, g_cit, g_cit_agg)
 #### 2 mode network 
 m_2m <- M %>% cocMatrix(Field = "CR", sep = ";")
 
-g_2m <- m_2m %>% igraph::graph_from_incidence_matrix(directed = TRUE, weighted = FALSE) %>% 
+g_2m <- m_2m %>% igraph::graph_from_incidence_matrix(directed = TRUE) %>% 
   igraph::simplify() 
 
 el_2m <- g_2m %>%
@@ -271,10 +271,21 @@ rm(histResults)
 # Conceptual Structure
 ############################################################################
 
-CS <- conceptualStructure(M,field="ID", method="CA", minDegree=4, clust=5, stemming=FALSE, labelsize=10, documents=10)
-CS %>% saveRDS("../temp/CS.RDS")
-rm(CS)
+#CS <- M %>% conceptualStructure(field="ID", method="CA", minDegree=4, clust=5, stemming=FALSE, labelsize=10, documents=10)
+#CS %>% saveRDS("../temp/CS.RDS")
+#rm(CS)
 
+############################################################################
+# Other stuff
+############################################################################
+M_threefield <- M %>% as.data.frame() %>% threeFieldsPlot()
+M_threefield %>% saveRDS("../temp/M_threefield.RDS")
+rm('M_threefield')
+
+# M %>% authorProdOverTime(k = 10, graph = TRUE)
+# M %>% rpys(sep = ";", graph = T)
+# M %>% thematicMap()
+# M_them_evo <- M %>% thematicEvolution(years = c(2000, 2019))
 
 ############################################################################
 # Topicmodel
@@ -341,8 +352,24 @@ text_dtm <- text_tidy %>%
   tm::removeSparseTerms(sparse = .99)
 
 # LDA
-text_lda <- text_dtm %>% LDA(k = 6, control = list(seed = 1337))
+text_lda <- text_dtm %>% LDA(k = 6, method= "Gibbs", control = list(seed = 1337))
 text_lda %>% saveRDS("../temp/text_lda.RDS")
+
+
+### LDA Viz
+text_dtm <- text_tidy %>%
+  cast_dtm(document, term, n) %>%
+  tm::removeSparseTerms(sparse = .99)
+
+library(LDAvis)
+json_lda <- topicmodels_json_ldavis(fitted = text_lda, 
+                                    doc_dtm = text_dtm, 
+                                    method = "TSNE")
+
+
+json_lda %>% serVis()
+json_lda %>% serVis(out.dir = 'output/LDAviz')
+
 
 rm(text_tidy, text_dtm, text_lda)
 
