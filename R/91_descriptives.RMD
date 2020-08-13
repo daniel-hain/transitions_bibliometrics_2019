@@ -161,24 +161,42 @@ Top 20 cited references:
 CR$Cited %>% as_tibble() %>% head(20)
 ```
 
+```{r}
+rm(CR)
+```
 
 ```{r}
 #M %>% gen_summary(top_n = 20, level = "PUB", what = "count", plot = TRUE) 
 ```
 
+## Conceptual trajectories: Historical citation path analysis
 
 ```{r}
-rm(CR)
+histResults <- readRDS("../../temp/histResults.RDS") 
+```
+
+```{r, fig.width=20, fig.height=17.5}
+histResults %>% histPlot(n = 25, size = 10, labelsize = 5)
+```
+
+
+```{r}
+rm(histResults)
 ```
 
 ### Authors, Themes & Journals
 
-```{r}
+```{r, fig.width=20, fig.height=17.5}
 M_threefield <- readRDS("../../temp/M_threefield.RDS") 
+```
+
+```{r, fig.width=20, fig.height=17.5}
 M_threefield
 ```
+
+
 ```{r}
-rm('M_threefield')
+rm(M_threefield)
 ```
 
 
@@ -199,7 +217,7 @@ text_lda <- readRDS("../../temp/text_lda.RDS")
 I by now created some topic modelling. The results are now more fine-tuned, but there is still room for some improvement. We ran a LDA on the titles + abstracts of our corpus, aiming at identifying 10 topics (some different numbers of topics to generate shows that 10 result in good results, more topics lead to too much overlap between them)
 
 ## Topics by topwords
-```{r} 
+```{r, fig.width=20, fig.height=17.5} 
 # , fig.width=20, fig.height=17.5
 mycol_lda <- text_lda %>% tidy(matrix = "beta") %>% gg_color_select(cat = topic, pal = "Paired")
 
@@ -223,24 +241,23 @@ text_lda %>% tidy(matrix = "beta") %>%
 
 This might still be finetuned, but initially doesnt look that bad I think. All the topics for me seem to be somewhat identifiable. We should maybe start naming them to make their interpretation later easier. 
 
-## Topics over time
+
 ```{r, fig.width = 15, fig.height=7.5}
 
-text_lda %>% tidy(matrix = "gamma") %>%
-  rename(weight = gamma) %>%
-  left_join(M %>% select(XX, PY), by = c('document' = 'XX')) %>%
-  mutate(PY = as.numeric(PY)) %>%
-  group_by(PY, topic) %>% summarise(weight = sum(weight)) %>% ungroup() %>%
-  group_by(PY) %>% mutate(weight_PY = sum(weight)) %>% ungroup() %>%
-  mutate(weight_rel = weight / weight_PY) %>%
-  select(PY, topic, weight, weight_rel) %>%
-  filter(PY >= 1998 & PY <= 2019) %>%
-  arrange(PY, topic) %>%
-  plot_summary_timeline(y1 = weight, y2 = weight_rel, t = PY, by = topic,  pal = "Paired", label = FALSE, 
-                        y1_text = "Topic popularity annualy", y2_text = "Share of topic annually")
+# ## Topics over time
+# text_lda %>% tidy(matrix = "gamma") %>%
+#   rename(weight = gamma) %>%
+#   left_join(M %>% select(XX, PY), by = c('document' = 'XX')) %>%
+#   mutate(PY = as.numeric(PY)) %>%
+#   group_by(PY, topic) %>% summarise(weight = sum(weight)) %>% ungroup() %>%
+#   group_by(PY) %>% mutate(weight_PY = sum(weight)) %>% ungroup() %>%
+#   mutate(weight_rel = weight / weight_PY) %>%
+#   select(PY, topic, weight, weight_rel) %>%
+#   filter(PY >= 1998 & PY <= 2019) %>%
+#   arrange(PY, topic) %>%
+#   plot_summary_timeline(y1 = weight, y2 = weight_rel, t = PY, by = topic,  pal = "Paired", label = FALSE, 
+#                         y1_text = "Topic popularity annualy", y2_text = "Share of topic annually")
 ```
-
-Here, we see quite  a shift in the discourse over time. 
 
 ## LDAViz
 Here you find a nice way of exploring topics via the `LDAVIz` methodology of visulizing the result of an LDA. It dispolays all topics in a 2 dimensional TSNE (similar to PCA, but optimized for graphical illustration in 2d), and also gives a nice visual representation over the topics top-word distribution and overall frequencies of this words in the corpus. The $\lambda$ parameter regulates the importance-ordering of the topwords. High $\lambda$ order words by the highest propability to appear in the topic to the lowest (independent of the overall word popularity in the corpus), whle low $\lambda$ emphasize words which are very specific to the topic, and rarely appear in others.
