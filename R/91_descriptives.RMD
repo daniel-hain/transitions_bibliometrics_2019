@@ -4,7 +4,7 @@ author: "Daniel S. Hain"
 date: "`r format(Sys.time(), '%d %B, %Y')`"
 output:
   html_document:
-    df_print: paged
+    df_print: kable
     toc: yes
     toc_depth: 3
     toc_float: yes
@@ -94,15 +94,20 @@ In the following, we more in detail investigate the seed papers.
 
 ### List of all seed papers
 
-NEEDS UPDATE
+NOTE: NEEDS BETTER FORMAT
 
 ```{r}
-# seed %>% 
-#   select(-SR, -index) %>%
-#   select(n, everything()) %>%
-#   kable(row.names = FALSE) %>% 
-#   kable_styling(bootstrap_options = c("striped", "hover", "condensed"), full_width = TRUE, font_size = 10) 
+seed <- convert2df(file = "../../input/scopus_00_seeds.csv", dbsource = "scopus", format = "csv")
 ```
+
+```{r}
+seed %>% rownames()
+```
+
+```{r}
+rm(seed)
+```
+
 
 ### Seep papers and corpus size
 
@@ -241,26 +246,190 @@ text_lda %>% tidy(matrix = "beta") %>%
 
 This might still be finetuned, but initially doesnt look that bad I think. All the topics for me seem to be somewhat identifiable. We should maybe start naming them to make their interpretation later easier. 
 
+## Topics over time
 
 ```{r, fig.width = 15, fig.height=7.5}
-
-# ## Topics over time
-# text_lda %>% tidy(matrix = "gamma") %>%
-#   rename(weight = gamma) %>%
-#   left_join(M %>% select(XX, PY), by = c('document' = 'XX')) %>%
-#   mutate(PY = as.numeric(PY)) %>%
-#   group_by(PY, topic) %>% summarise(weight = sum(weight)) %>% ungroup() %>%
-#   group_by(PY) %>% mutate(weight_PY = sum(weight)) %>% ungroup() %>%
-#   mutate(weight_rel = weight / weight_PY) %>%
-#   select(PY, topic, weight, weight_rel) %>%
-#   filter(PY >= 1998 & PY <= 2019) %>%
-#   arrange(PY, topic) %>%
-#   plot_summary_timeline(y1 = weight, y2 = weight_rel, t = PY, by = topic,  pal = "Paired", label = FALSE, 
-#                         y1_text = "Topic popularity annualy", y2_text = "Share of topic annually")
+text_lda %>% tidy(matrix = "gamma") %>%
+  rename(weight = gamma) %>%
+  left_join(M %>% select(XX, PY), by = c('document' = 'XX')) %>%
+  mutate(PY = as.numeric(PY)) %>%
+  group_by(PY, topic) %>% summarise(weight = sum(weight)) %>% ungroup() %>%
+  group_by(PY) %>% mutate(weight_PY = sum(weight)) %>% ungroup() %>%
+  mutate(weight_rel = weight / weight_PY) %>%
+  select(PY, topic, weight, weight_rel) %>%
+  filter(PY >= 1998 & PY <= 2019) %>%
+  arrange(PY, topic) %>%
+  plot_summary_timeline(y1 = weight, y2 = weight_rel, t = PY, by = topic,  pal = "Paired", label = FALSE,
+                        y1_text = "Topic popularity annualy", y2_text = "Share of topic annually")
 ```
 
 ## LDAViz
 Here you find a nice way of exploring topics via the `LDAVIz` methodology of visulizing the result of an LDA. It dispolays all topics in a 2 dimensional TSNE (similar to PCA, but optimized for graphical illustration in 2d), and also gives a nice visual representation over the topics top-word distribution and overall frequencies of this words in the corpus. The $\lambda$ parameter regulates the importance-ordering of the topwords. High $\lambda$ order words by the highest propability to appear in the topic to the lowest (independent of the overall word popularity in the corpus), whle low $\lambda$ emphasize words which are very specific to the topic, and rarely appear in others.
 
 Play a bit around. Since it would be here a bit condensed, better check it out  [HERE](https://daniel-hain.github.io/transitions_bibliometrics_2019/output/LDAviz/) in fullscreen for a better overview.
+
+<!-- ####################################################################################### -->
+<!-- ####################################################################################### -->
+<!-- ############################# NEXT PART ############################################### -->
+<!-- ####################################################################################### -->
+<!-- ####################################################################################### -->
+
+```{r}
+rm(text_dtm, text_tidy, text_lda)
+```
+
+
+# Knowledge Bases: Co-Citation network analysis {.tabset}
+
+```{r}
+C_nw <- readRDS("../../temp/C_nw.RDS")
+```
+
+
+```{r}
+# names_kb <- tibble( 
+#   com = 1:10,
+#   com_kb_name = c(
+#     "01: xxx",
+#     "..."))
+
+# C %<>% left_join(names_kb, by = "com")
+```
+
+**Note:** This analysis refers the co-citation analysis, where the cited references and not the original publications are the unit of analysis. See tab `Technical description`for additional explanations
+
+## Knowledge Bases summary
+
+### Main Indicators
+In order to partition networks into components or clusters, we deploy a **community detection** technique based on the **Lovain Algorithm** (Blondel et al., 2008). The Lovain Algorithm is a heuristic method that attempts to optimize the modularity of communities within a network by maximizing within- and minimizing between-community connectivity. We identify the following communities = knowledge bases
+
+It is not the main focus of this exercise, but still informative to see which historical knowledge the fields draws from. 
+
+NOTE: Up to now I only report the most central emmbers per community
+
+```{r}
+C_nw %>% group_by(com) %>% 
+  slice_max(order_by = dgr_int, n = 10)
+```
+
+### Development of Knowledge Bases
+
+TO BE DONE AGAIN 
+```{r}
+# cit_kb %<>% 
+#   select(EID, CR_SID, CR_PY) %>%
+#   rename(SID = CR_SID) %>%
+#   left_join(M %>% select(EID, PY, com), by = "EID") %>%
+#   rename(com_RA = com) %>%
+#   left_join(C %>% select(SID, com), by = "SID") %>%
+#   rename(com_KB = com) 
+# 
+# cit_kb %<>% 
+#   group_by(PY, com_KB) %>%
+#   summarize(TC = n()) %>%
+#   ungroup() %>% 
+#   drop_na() %>%
+#   group_by(PY) %>%
+#   mutate(TC.rel = TC / sum(TC)) %>%
+#   arrange(PY, com_KB) %>%
+#   ungroup()
+```
+
+
+```{r, fig.width = 15, fig.height=7.5}
+# cit_kb %>% 
+#   plot_summary_timeline(y1 = TC, y2 = TC.rel, by = com_kb_name, pal = "Paired", label = TRUE,
+#                         y1_text = "Number citations recieved annually",  y2_text = "Share of citations recieved annually",
+#                         PY_max = 2016)
+```
+
+## Technical description
+In a co-cittion network, the strength of the relationship between a reference pair $m$ and $n$ ($s_{m,n}^{coc}$) is expressed by the number of publications $C$ which are jointly citing reference $m$ and $n$. 
+
+$$s_{m,n}^{coc} = \sum_i c_{i,m} c_{i,n}$$
+
+The intuition here is that references which are frequently cited together are likely to share commonalities in theory, topic, methodology, or context. It can be interpreted as a measure of similarity as evaluated by other researchers that decide to jointly cite both references. Because the publication process is time-consuming, co-citation is a backward-looking measure, which is appropriate to map the relationship between core literature of a field.
+
+
+<!-- ####################################################################################### -->
+<!-- ####################################################################################### -->
+<!-- ############################# NEXT PART ############################################### -->
+<!-- ####################################################################################### -->
+<!-- ####################################################################################### -->
+
+# Research Areas: Bibliographic coupling analysis {.tabset}
+```{r}
+# names_ra <- tibble( 
+#   com = 1:7,
+#   com_ra_name = c(
+#     "01: XX",
+#     "...")
+# )
+
+# M %<>% left_join(names_ra, by = "com")
+# cols_ra <- names_ra %>% gg_color_select(com_ra_name) 
+```
+
+This is arguably the more interesting part. Here, we identify the literature's current knowledge frontier by carrying out a bibliographic coupling analysis of the publications in our corpus. This measure  uses bibliographical information of  publications to establish a similarity relationship between them. Again, method details to be found in the tab `Technical description`. As you will see, we identify the more narrow research community of Sustainability Transitions (in which we will zoom in later), but also a set of adjacent research areas with some theoretical/methodological/application overlap.
+
+## Research Areas main summary
+
+### Main Characteristics
+To identify communities in the field's knowledge frontier (labeled **research areas**) we again use the **Lovain Algorithm** (Blondel et al., 2008). We identify the following communities = research areas.
+
+```{r}
+M_bib %>%
+  group_by(com) %>%
+  summarise(n = n(), density_int = ((sum(dgr_int) / (n() * (n() - 1))) * 100) %>% round(3)) %>%
+  select(com, everything())
+```
+### Categorization
+
+I up to now gain only provide the 10 most central articles, which can be used to classify them
+
+```{r}
+M_bib %>% group_by(com) %>% 
+  slice_max(order_by = dgr_int, n = 10)
+```
+
+### Development
+```{r, fig.width = 15, fig.height=7.5}
+M_bib %>%
+  left_join(M %>% select(XX, PY), by = 'XX') %>%
+  mutate(PY = PY %>% as.numeric()) %>%
+  group_by(com, PY) %>% summarise(n = n()) %>% ungroup() %>%
+  group_by(PY) %>% mutate(n_PY = sum(n)) %>% ungroup() %>%
+  mutate(n_rel = n / n_PY) %>%
+  select(com, PY, n, n_rel) %>%
+  filter(PY >= 1998 & PY <= 2019) %>% 
+  arrange(com, PY) %>% 
+  plot_summary_timeline(y1 = n, y2 = n_rel, t = PY, by = com, label = TRUE,
+                        y1_text = "Number publications annually", y2_text = "Share of publications annually")
+```
+
+We again see quite some dynamics....
+
+### Connectivity between the research areas
+```{r}
+g_agg <- readRDS("../../temp/g_bib_agg.RDS")
+
+g_agg <- g_agg %N>%
+  arrange(com) # %>%
+#   mutate(name = names_ra %>% pull(com_ra_name),
+#          color = cols_ra)
+```
+
+```{r, fig.height= 7.5, fig.width=7.5}
+g_agg %E>% 
+  filter(weight > 0 & from != to) %>%
+  filter(weight >= quantile(weight, 0.25) )  %>%
+  ggraph(layout = "circle") + 
+  geom_edge_arc(strenght = 0.075, aes(width = weight), alpha = 0.2)  + 
+  geom_node_point(aes(size = N, color = com))  + 
+  geom_node_text(aes(label = com), repel = TRUE) +
+  theme_graph(base_family = "Arial")
+```
+
+
+
 

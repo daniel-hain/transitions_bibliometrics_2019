@@ -311,7 +311,7 @@ plot_summary_timeline <- function(x, y1, y2, t, by,
                               size = 3) )
   }
   
-  out <- p1 + p2 + plot_layout(guides = "collect")
+  out <- p1 + p2 + plot_layout(guides = "collect") & theme(legend.position = 'bottom')
   
   return(out)
 }
