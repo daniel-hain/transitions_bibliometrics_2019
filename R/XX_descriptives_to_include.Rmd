@@ -249,24 +249,6 @@ M1 %>% gen_summary(top_n = 10, level = "PUB", what = "top", plot = TRUE, select_
 #### Summary
 TBD.
 
-## Technical description
-In a bibliographic coupling network, the **coupling-strength** between publications is determined by the number of commonly cited references they share, assuming a common pool of references to indicate similarity in context, methods, or theory. Formally, the strength of the relationship between a publication pair $i$ and $j$ ($s_{i,j}^{bib}$) is expressed by the number of commonly cited references. 
-
-$$	s_{i,j}^{bib} = \sum_m c_{i,m} c_{j,m} $$
-
-Since our corpus contains publications which differ strongly in terms of the number of cited references, we normalize the coupling strength by the Jaccard similarity coefficient. Here, we weight the intercept of two publications' bibliography (shared refeences) by their union (number of all references cited by either $i$ or $j$). It is bounded between zero and one, where one indicates the two publications to have an identical bibliography, and zero that they do not share any cited reference. Thereby, we prevent publications from having high coupling strength due to a large bibliography (e.g., literature surveys).
-
-$$	S_{i,j}^{jac-bib} =\frac{C(i \cap j)}{C(i \cup j)} = \frac{s_{i,j}^{bib}}{c_i + c_j - s_{i,j}^{bib}} $$
-
-More recent articles have a higher pool of possible references to co-cite to, hence they are more likely to be coupled. Consequently, bibliographic coupling represents a forward looking measure, and the method of choice to identify the current knowledge frontier at the point of analysis.
-
-
-<!-- ####################################################################################### -->
-<!-- ####################################################################################### -->
-<!-- ############################# NEXT PART ############################################### -->
-<!-- ####################################################################################### -->
-<!-- ####################################################################################### -->
-
 
 # Zooming in the systainability transitions community {.tabset}
 

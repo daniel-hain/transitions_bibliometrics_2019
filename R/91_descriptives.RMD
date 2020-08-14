@@ -4,7 +4,7 @@ author: "Daniel S. Hain"
 date: "`r format(Sys.time(), '%d %B, %Y')`"
 output:
   html_document:
-    df_print: kable
+    df_print: paged
     toc: yes
     toc_depth: 3
     toc_float: yes
@@ -97,11 +97,23 @@ In the following, we more in detail investigate the seed papers.
 NOTE: NEEDS BETTER FORMAT
 
 ```{r}
-seed <- convert2df(file = "../../input/scopus_00_seeds.csv", dbsource = "scopus", format = "csv")
+seed <- convert2df(file = "../../input/scopus_00_seeds.csv", dbsource = "scopus", format = "csv") %>% as_tibble()
 ```
 
 ```{r}
-seed %>% rownames()
+seed %<>% 
+  mutate(NR = 1: n(),
+         TC_year = TC / (2019 + 1 - PY),
+         AU = AU %>% str_trunc(25),
+         TI = TI %>% str_trunc(50)) %>%
+  select(NR, AU, PY, TI, J9, TC, TC_year) %>%
+  arrange(desc(TC_year))
+```
+
+
+```{r}
+seed %>% kable() %>%
+  kable_styling(bootstrap_options = c("striped", "hover", "condensed", "responsive"))
 ```
 
 ```{r}
@@ -126,7 +138,6 @@ plot <- M %>%
 plot %>% plotly::ggplotly(tooltip = c("x", "y") )
 ```
 
-First insight: It appears the main Sustainability corpus seems saturated, expansion appears more in adjacent fields.
 
 <!-- ####################################################################################### -->
 <!-- ####################################################################################### -->
@@ -163,7 +174,9 @@ CR <- readRDS("../../temp/CR.RDS")
 Top 20 cited references:
 
 ```{r}
-CR$Cited %>% as_tibble() %>% head(20)
+CR$Cited %>% as_tibble() %>% head(20) %>% 
+  kable() %>%
+  kable_styling(bootstrap_options = c("striped", "hover", "condensed", "responsive"))
 ```
 
 ```{r}
@@ -180,8 +193,8 @@ rm(CR)
 histResults <- readRDS("../../temp/histResults.RDS") 
 ```
 
-```{r, fig.width=20, fig.height=17.5}
-histResults %>% histPlot(n = 25, size = 10, labelsize = 5)
+```{r, fig.width=17.5, fig.height=17.5}
+histResults %>% histPlot(n = 25, size = 10, labelsize = 7.5)
 ```
 
 
@@ -195,7 +208,7 @@ rm(histResults)
 M_threefield <- readRDS("../../temp/M_threefield.RDS") 
 ```
 
-```{r, fig.width=20, fig.height=17.5}
+```{r, fig.width=17.5, fig.height=17.5}
 M_threefield
 ```
 
@@ -222,8 +235,7 @@ text_lda <- readRDS("../../temp/text_lda.RDS")
 I by now created some topic modelling. The results are now more fine-tuned, but there is still room for some improvement. We ran a LDA on the titles + abstracts of our corpus, aiming at identifying 10 topics (some different numbers of topics to generate shows that 10 result in good results, more topics lead to too much overlap between them)
 
 ## Topics by topwords
-```{r, fig.width=20, fig.height=17.5} 
-# , fig.width=20, fig.height=17.5
+```{r, fig.width=17.5, fig.height=15} 
 mycol_lda <- text_lda %>% tidy(matrix = "beta") %>% gg_color_select(cat = topic, pal = "Paired")
 
 text_lda %>% tidy(matrix = "beta") %>%
@@ -285,7 +297,6 @@ rm(text_dtm, text_tidy, text_lda)
 C_nw <- readRDS("../../temp/C_nw.RDS")
 ```
 
-
 ```{r}
 # names_kb <- tibble( 
 #   com = 1:10,
@@ -295,52 +306,63 @@ C_nw <- readRDS("../../temp/C_nw.RDS")
 
 # C %<>% left_join(names_kb, by = "com")
 ```
-
 **Note:** This analysis refers the co-citation analysis, where the cited references and not the original publications are the unit of analysis. See tab `Technical description`for additional explanations
 
 ## Knowledge Bases summary
 
 ### Main Indicators
-In order to partition networks into components or clusters, we deploy a **community detection** technique based on the **Lovain Algorithm** (Blondel et al., 2008). The Lovain Algorithm is a heuristic method that attempts to optimize the modularity of communities within a network by maximizing within- and minimizing between-community connectivity. We identify the following communities = knowledge bases
+In order to partition networks into components or clusters, we deploy a **community detection** technique based on the **Lovain Algorithm** (Blondel et al., 2008). The Lovain Algorithm is a heuristic method that attempts to optimize the modularity of communities within a network by maximizing within- and minimizing between-community connectivity. We identify the following communities = knowledge bases.
+
+```{r}
+C_nw %>%
+  group_by(com) %>%
+  summarise(n = n(), density_int = ((sum(dgr_int) / (n() * (n() - 1))) * 100) %>% round(3)) %>%
+  select(com, everything())
+```
 
 It is not the main focus of this exercise, but still informative to see which historical knowledge the fields draws from. 
 
-NOTE: Up to now I only report the most central emmbers per community
+NOTE: Up to now I only report the most central members per community
 
 ```{r}
 C_nw %>% group_by(com) %>% 
-  slice_max(order_by = dgr_int, n = 10)
+  select(com, name, dgr_int, dgr) %>%
+  arrange(com, desc(dgr_int)) %>%
+  mutate(name = name %>% str_trunc(50)) %>%
+  slice_max(order_by = dgr_int, n = 10) %>% kable() %>%
+  kable_styling(bootstrap_options = c("striped", "hover", "condensed", "responsive"))
 ```
-
 ### Development of Knowledge Bases
 
-TO BE DONE AGAIN 
 ```{r}
-# cit_kb %<>% 
-#   select(EID, CR_SID, CR_PY) %>%
-#   rename(SID = CR_SID) %>%
-#   left_join(M %>% select(EID, PY, com), by = "EID") %>%
-#   rename(com_RA = com) %>%
-#   left_join(C %>% select(SID, com), by = "SID") %>%
-#   rename(com_KB = com) 
-# 
-# cit_kb %<>% 
-#   group_by(PY, com_KB) %>%
-#   summarize(TC = n()) %>%
-#   ungroup() %>% 
-#   drop_na() %>%
-#   group_by(PY) %>%
-#   mutate(TC.rel = TC / sum(TC)) %>%
-#   arrange(PY, com_KB) %>%
-#   ungroup()
+el_2m<- readRDS("../../temp/el_2m.RDS")
+```
+
+
+```{r}
+el_2m %<>% 
+  inner_join(M %>% select(XX, PY), by = c('from' = 'XX')) %<>%
+  select(com_bib, com_cit, PY)
+```
+
+ 
+```{r}
+el_2m %<>%
+  group_by(PY, com_cit) %>%
+  summarise(TC = n()) %>%
+  ungroup() %>%
+  drop_na() %>%
+  group_by(PY) %>%
+  mutate(TC_rel = TC / sum(TC)) %>%
+  ungroup() %>%
+  arrange(PY, com_cit)
 ```
 
 
 ```{r, fig.width = 15, fig.height=7.5}
-# cit_kb %>% 
-#   plot_summary_timeline(y1 = TC, y2 = TC.rel, by = com_kb_name, pal = "Paired", label = TRUE,
-#                         y1_text = "Number citations recieved annually",  y2_text = "Share of citations recieved annually",
-#                         PY_max = 2016)
+el_2m %>% 
+  plot_summary_timeline(y1 = TC, y2 = TC_rel, t = PY, by = com_cit, pal = "Paired", label = TRUE,
+                        y1_text = "Number citations recieved annually",  y2_text = "Share of citations recieved annually")
 ```
 
 ## Technical description
@@ -389,10 +411,18 @@ I up to now gain only provide the 10 most central articles, which can be used to
 
 ```{r}
 M_bib %>% group_by(com) %>% 
-  slice_max(order_by = dgr_int, n = 10)
+  left_join(M %>% select(XX, AU, PY, TI, J9, TC)) %>%
+  slice_max(order_by = dgr_int, n = 10) %>% 
+  mutate(TC_year = TC / (2019 + 1 - PY),
+         AU = AU %>% str_trunc(25),
+         TI = TI %>% str_trunc(50)) %>%
+  select(AU, PY, TI, J9, dgr_int, TC, TC_year) %>% 
+  kable() %>%
+  kable_styling(bootstrap_options = c("striped", "hover", "condensed", "responsive"))
 ```
 
 ### Development
+
 ```{r, fig.width = 15, fig.height=7.5}
 M_bib %>%
   left_join(M %>% select(XX, PY), by = 'XX') %>%
@@ -429,6 +459,24 @@ g_agg %E>%
   geom_node_text(aes(label = com), repel = TRUE) +
   theme_graph(base_family = "Arial")
 ```
+
+### Technical description
+In a bibliographic coupling network, the **coupling-strength** between publications is determined by the number of commonly cited references they share, assuming a common pool of references to indicate similarity in context, methods, or theory. Formally, the strength of the relationship between a publication pair $i$ and $j$ ($s_{i,j}^{bib}$) is expressed by the number of commonly cited references. 
+
+$$	s_{i,j}^{bib} = \sum_m c_{i,m} c_{j,m} $$
+
+Since our corpus contains publications which differ strongly in terms of the number of cited references, we normalize the coupling strength by the Jaccard similarity coefficient. Here, we weight the intercept of two publications' bibliography (shared refeences) by their union (number of all references cited by either $i$ or $j$). It is bounded between zero and one, where one indicates the two publications to have an identical bibliography, and zero that they do not share any cited reference. Thereby, we prevent publications from having high coupling strength due to a large bibliography (e.g., literature surveys).
+
+$$	S_{i,j}^{jac-bib} =\frac{C(i \cap j)}{C(i \cup j)} = \frac{s_{i,j}^{bib}}{c_i + c_j - s_{i,j}^{bib}} $$
+
+More recent articles have a higher pool of possible references to co-cite to, hence they are more likely to be coupled. Consequently, bibliographic coupling represents a forward looking measure, and the method of choice to identify the current knowledge frontier at the point of analysis.
+
+
+<!-- ####################################################################################### -->
+<!-- ####################################################################################### -->
+<!-- ############################# NEXT PART ############################################### -->
+<!-- ####################################################################################### -->
+<!-- ####################################################################################### -->
 
 
 
