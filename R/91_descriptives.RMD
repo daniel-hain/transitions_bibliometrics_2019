@@ -105,7 +105,7 @@ seed %<>%
   mutate(NR = 1: n(),
          TC_year = TC / (2019 + 1 - PY),
          AU = AU %>% str_trunc(25),
-         TI = TI %>% str_trunc(50)) %>%
+         TI = TI %>% str_trunc(75)) %>%
   select(NR, AU, PY, TI, J9, TC, TC_year) %>%
   arrange(desc(TC_year))
 ```
@@ -113,7 +113,7 @@ seed %<>%
 
 ```{r}
 seed %>% kable() %>%
-  kable_styling(bootstrap_options = c("striped", "hover", "condensed", "responsive"))
+  kable_styling(bootstrap_options = c("striped", "hover", "condensed", "responsive"), font_size = 8)
 ```
 
 ```{r}
@@ -176,7 +176,7 @@ Top 20 cited references:
 ```{r}
 CR$Cited %>% as_tibble() %>% head(20) %>% 
   kable() %>%
-  kable_styling(bootstrap_options = c("striped", "hover", "condensed", "responsive"))
+  kable_styling(bootstrap_options = c("striped", "hover", "condensed", "responsive"), font_size = 8)
 ```
 
 ```{r}
@@ -232,12 +232,15 @@ text_tidy <- readRDS("../../temp/text_tidy.RDS")
 text_lda <- readRDS("../../temp/text_lda.RDS")
 ```
 
+```{r}
+mycol_lda <- text_lda %>% tidy(matrix = "beta") %>% gg_color_select(cat = topic, pal = "Paired")
+```
+
+
 I by now created some topic modelling. The results are now more fine-tuned, but there is still room for some improvement. We ran a LDA on the titles + abstracts of our corpus, aiming at identifying 10 topics (some different numbers of topics to generate shows that 10 result in good results, more topics lead to too much overlap between them)
 
 ## Topics by topwords
 ```{r, fig.width=17.5, fig.height=15} 
-mycol_lda <- text_lda %>% tidy(matrix = "beta") %>% gg_color_select(cat = topic, pal = "Paired")
-
 text_lda %>% tidy(matrix = "beta") %>%
   group_by(topic) %>%
   slice_max(beta, n = 10) %>%
@@ -298,14 +301,27 @@ C_nw <- readRDS("../../temp/C_nw.RDS")
 ```
 
 ```{r}
-# names_kb <- tibble( 
-#   com = 1:10,
-#   com_kb_name = c(
-#     "01: xxx",
-#     "..."))
-
-# C %<>% left_join(names_kb, by = "com")
+com_names_cit <- tibble( 
+  com = 1:(C_nw %>% pull(com) %>% n_distinct()),
+  com_name = c(
+    '1 Transition studies',
+    '2 Classic innovation studies',
+    '3 Territorial innovation systems',
+    '4 (National) innovation systems',
+    '5 Sociology and practice theory',
+    '6 Socio-ecological systems',
+    '7 Political ecology and governance'))
 ```
+
+```{r}
+C_nw %<>% left_join(com_names_cit, by = "com")
+```
+
+```{r}
+mycol_cit <- C_nw %>% gg_color_select(cat = com, pal = "Dark2")
+```
+
+
 **Note:** This analysis refers the co-citation analysis, where the cited references and not the original publications are the unit of analysis. See tab `Technical description`for additional explanations
 
 ## Knowledge Bases summary
@@ -315,9 +331,9 @@ In order to partition networks into components or clusters, we deploy a **commun
 
 ```{r}
 C_nw %>%
-  group_by(com) %>%
+  group_by(com_name) %>%
   summarise(n = n(), density_int = ((sum(dgr_int) / (n() * (n() - 1))) * 100) %>% round(3)) %>%
-  select(com, everything())
+  relocate(com_name, everything())
 ```
 
 It is not the main focus of this exercise, but still informative to see which historical knowledge the fields draws from. 
@@ -328,9 +344,9 @@ NOTE: Up to now I only report the most central members per community
 C_nw %>% group_by(com) %>% 
   select(com, name, dgr_int, dgr) %>%
   arrange(com, desc(dgr_int)) %>%
-  mutate(name = name %>% str_trunc(50)) %>%
+  mutate(name = name %>% str_trunc(100)) %>%
   slice_max(order_by = dgr_int, n = 10) %>% kable() %>%
-  kable_styling(bootstrap_options = c("striped", "hover", "condensed", "responsive"))
+  kable_styling(bootstrap_options = c("striped", "hover", "condensed", "responsive"), font_size = 8)
 ```
 ### Development of Knowledge Bases
 
@@ -361,7 +377,7 @@ el_2m %<>%
 
 ```{r, fig.width = 15, fig.height=7.5}
 el_2m %>% 
-  plot_summary_timeline(y1 = TC, y2 = TC_rel, t = PY, by = com_cit, pal = "Paired", label = TRUE,
+  plot_summary_timeline(y1 = TC, y2 = TC_rel, t = PY, by = com_cit, pal = "Dark2", label = TRUE,
                         y1_text = "Number citations recieved annually",  y2_text = "Share of citations recieved annually")
 ```
 
@@ -392,6 +408,10 @@ The intuition here is that references which are frequently cited together are li
 # cols_ra <- names_ra %>% gg_color_select(com_ra_name) 
 ```
 
+```{r}
+mycol_bib <- M_bib %>% gg_color_select(cat = com, pal = "Dark2")
+```
+
 This is arguably the more interesting part. Here, we identify the literature's current knowledge frontier by carrying out a bibliographic coupling analysis of the publications in our corpus. This measure  uses bibliographical information of  publications to establish a similarity relationship between them. Again, method details to be found in the tab `Technical description`. As you will see, we identify the more narrow research community of Sustainability Transitions (in which we will zoom in later), but also a set of adjacent research areas with some theoretical/methodological/application overlap.
 
 ## Research Areas main summary
@@ -412,13 +432,14 @@ I up to now gain only provide the 10 most central articles, which can be used to
 ```{r}
 M_bib %>% group_by(com) %>% 
   left_join(M %>% select(XX, AU, PY, TI, J9, TC)) %>%
-  slice_max(order_by = dgr_int, n = 10) %>% 
+  mutate(dgr_select = (dgr_int / max(dgr_int) * (TC / max(TC))) ) %>%
+  slice_max(order_by = dgr_select, n = 10) %>% 
   mutate(TC_year = TC / (2019 + 1 - PY),
          AU = AU %>% str_trunc(25),
-         TI = TI %>% str_trunc(50)) %>%
+         TI = TI %>% str_trunc(100)) %>%
   select(AU, PY, TI, J9, dgr_int, TC, TC_year) %>% 
   kable() %>%
-  kable_styling(bootstrap_options = c("striped", "hover", "condensed", "responsive"))
+  kable_styling(bootstrap_options = c("striped", "hover", "condensed", "responsive"), font_size = 8)
 ```
 
 ### Development
@@ -455,9 +476,10 @@ g_agg %E>%
   filter(weight >= quantile(weight, 0.25) )  %>%
   ggraph(layout = "circle") + 
   geom_edge_arc(strenght = 0.075, aes(width = weight), alpha = 0.2)  + 
-  geom_node_point(aes(size = N, color = com))  + 
+  geom_node_point(aes(size = N, color = factor(com)))  + 
   geom_node_text(aes(label = com), repel = TRUE) +
-  theme_graph(base_family = "Arial")
+  theme_graph(base_family = "Arial") +
+  scale_color_brewer(palette = 'Paired') 
 ```
 
 ### Technical description
