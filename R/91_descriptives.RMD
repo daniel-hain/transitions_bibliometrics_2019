@@ -371,13 +371,14 @@ el_2m %<>%
   group_by(PY) %>%
   mutate(TC_rel = TC / sum(TC)) %>%
   ungroup() %>%
-  arrange(PY, com_cit)
+  arrange(PY, com_cit) %>%
+  left_join(com_names_cit , by = c('com_cit' = 'com'))
 ```
 
 
 ```{r, fig.width = 15, fig.height=7.5}
 el_2m %>% 
-  plot_summary_timeline(y1 = TC, y2 = TC_rel, t = PY, by = com_cit, pal = "Dark2", label = TRUE,
+  plot_summary_timeline(y1 = TC, y2 = TC_rel, t = PY, by = com_name, pal = "Dark2", label = TRUE,
                         y1_text = "Number citations recieved annually",  y2_text = "Share of citations recieved annually")
 ```
 
